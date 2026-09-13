@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>外置扬声器 · 控制台</title>
+<style>
+  :root{
+    --bg:#faf9f6; --card:#ffffff; --line:#e6e4dd; --line2:#d4d1c8;
+    --tx:#22221f; --tx2:#5f5e5a; --tx3:#8b8a84;
+    --accent:#185fa5; --accent-bg:#e6f1fb; --accent-d:#0c447c;
+    --ok:#0f6e56; --ok-bg:#e1f5ee;
+    --warn:#ba7517; --warn-bg:#faeeda;
+    --bad:#a32d2d; --bad-bg:#fcebeb;
+    --sunken:#f6f4ef;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--tx);
+    font-family:-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    font-size:14px; line-height:1.6;
+  }
+  .wrap{max-width:1180px; margin:0 auto; padding:24px 20px 48px}
+
+  header.top{display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom:20px}
+  h1{font-size:19px; font-weight:600; margin:0; letter-spacing:-.2px}
+  .sub{font-size:12.5px; color:var(--tx3); margin:2px 0 0}
+  .topright{display:flex; align-items:center; gap:14px}
+  .dot{width:10px; height:10px; border-radius:50%; background:var(--line2); flex:0 0 auto}
+  .dot.on{background:var(--ok); box-shadow:0 0 0 4px var(--ok-bg)}
+  .dot.off{background:var(--tx3); box-shadow:0 0 0 4px var(--sunken)}
+  .dot.err{background:var(--bad); box-shadow:0 0 0 4px var(--bad-bg)}
+  .stateTxt{font-size:13.5px; font-weight:500}
+
+  .grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); gap:16px; align-items:start}
+  .span-all{grid-column:1 / -1}
+  .card{background:var(--card); border:0.5px solid var(--line); border-radius:14px; padding:18px}
+  .card h2{font-size:14px; font-weight:600; margin:0 0 14px; display:flex; align-items:center; justify-content:space-between; gap:10px}
+  .card h2 .hint{font-size:11.5px; color:var(--tx3); font-weight:400}
+
+  .metrics{display:grid; grid-template-columns:repeat(auto-fit,minmax(112px,1fr)); gap:8px}
+  .metric{background:var(--sunken); border-radius:9px; padding:9px 11px; min-width:0}
+  .metric .k{font-size:11px; color:var(--tx3); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .metric .v{font-size:15px; font-weight:600; font-variant-numeric:tabular-nums; letter-spacing:-.2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .metric .v small{font-size:10.5px; font-weight:400; color:var(--tx3)}
+
+  .devinfo{margin-top:12px; font-size:12.5px; color:var(--tx2); display:flex; gap:8px; flex-wrap:wrap}
+  .tag{display:inline-block; background:var(--sunken); border-radius:6px; padding:1px 7px; font-size:11.5px; color:var(--tx2); font-variant-numeric:tabular-nums}
+  .tag.ok{background:var(--ok-bg); color:var(--ok)}
+  .tag.bad{background:var(--bad-bg); color:var(--bad)}
+  .tag.warn{background:var(--warn-bg); color:var(--warn)}
+  .tag.acc{background:var(--accent-bg); color:var(--accent-d)}
+
+  .linkrow{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px}
+  .url{
+    font-family:Consolas,"SF Mono",Menlo,monospace; font-size:15px; font-weight:600;
+    color:var(--accent-d); word-break:break-all;
+  }
+  .qrbox{background:#fff; border:0.5px solid var(--line); border-radius:10px; padding:10px; display:inline-block; margin-top:12px}
+  .qrbox img{display:block; width:148px; height:148px}
+  .altlist{margin-top:12px; display:flex; flex-direction:column; gap:5px}
+  .altlist .row{display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--tx2)}
+  .altlist code{font-family:Consolas,monospace; color:var(--tx); background:var(--sunken); padding:1px 6px; border-radius:5px}
+
+  .field{display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:11px}
+  .field label{font-size:13px; color:var(--tx2); flex:0 0 auto}
+  select{
+    font-family:inherit; font-size:13px; padding:7px 9px; border-radius:8px;
+    border:0.5px solid var(--line2); background:var(--card); color:var(--tx);
+    min-width:0; max-width:230px; flex:1 1 auto;
+  }
+  select:focus{outline:none; border-color:var(--accent)}
+
+  button{
+    font-family:inherit; font-size:13px; padding:9px 14px; border-radius:9px;
+    border:0.5px solid var(--line2); background:var(--card); color:var(--tx);
+    cursor:pointer; transition:opacity .15s;
+  }
+  button:hover{border-color:var(--line2); background:var(--sunken)}
+  button:active{opacity:.8}
+  button:disabled{opacity:.45; cursor:not-allowed}
+  button.primary{background:var(--accent); border-color:var(--accent); color:#fff; font-weight:500}
+  button.primary:hover{background:var(--accent-d); border-color:var(--accent-d)}
+  button.danger{color:var(--bad); border-color:#e8d5d5}
+  button.danger:hover{background:var(--bad-bg)}
+  button.wide{width:100%}
+  .btnrow{display:flex; gap:8px; flex-wrap:wrap}
+  .btnrow.stack{flex-direction:column}
+
+  table{width:100%; border-collapse:collapse; font-size:12.5px}
+  th{text-align:left; font-weight:500; color:var(--tx3); font-size:11.5px; padding:6px 8px; border-bottom:0.5px solid var(--line)}
+  td{padding:8px; border-bottom:0.5px solid var(--line); font-variant-numeric:tabular-nums; vertical-align:middle}
+  tr:last-child td{border-bottom:none}
+  td.ua{font-variant-numeric:normal; max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--tx2)}
+  .empty{color:var(--tx3); font-size:12.5px; padding:14px 0; text-align:center}
+
+  .chart{margin-top:6px}
+  .chart .clabel{font-size:11.5px; color:var(--tx3); display:flex; justify-content:space-between; margin-bottom:4px}
+  .chart svg{display:block; width:100%; height:56px; background:var(--sunken); border-radius:8px}
+
+  pre.log{
+    margin:0; background:var(--sunken); border-radius:9px; padding:12px;
+    font-family:Consolas,"SF Mono",Menlo,monospace; font-size:11.5px; line-height:1.65;
+    color:var(--tx2); max-height:230px; overflow:auto; white-space:pre-wrap; word-break:break-all;
+  }
+  .note{font-size:12px; color:var(--tx3); margin:10px 0 0; line-height:1.65}
+  .note b{color:var(--tx2); font-weight:600}
+  .toast{
+    position:fixed; left:50%; bottom:28px; transform:translateX(-50%);
+    background:var(--tx); color:#fff; font-size:13px; padding:10px 18px;
+    border-radius:9px; opacity:0; pointer-events:none; transition:opacity .2s;
+    max-width:80vw; text-align:center;
+  }
+  .toast.show{opacity:.94}
+  .warnlist{margin:10px 0 0; padding:0; list-style:none; display:flex; flex-direction:column; gap:5px}
+  .warnlist li{font-size:12px; color:var(--warn); background:var(--warn-bg); border-radius:7px; padding:6px 9px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div>
+      <h1>外置扬声器 · 控制台</h1>
+      <p class="sub">主机端图形化控制面板 —— 参数调整、链路探测、客户端监控</p>
+    </div>
+    <div class="topright">
+      <span class="dot off" id="dot"></span>
+      <span class="stateTxt" id="stateTxt">正在连接…</span>
+      <button id="btnRefresh">刷新一次</button>
+    </div>
+  </header>
+
+  <div class="grid">
+
+    <div class="card span-all">
+      <h2>运行状态 <span class="hint" id="uptimeHint">—</span></h2>
+      <div class="metrics">
+        <div class="metric"><div class="k">推送采样率</div><div class="v" id="mRate">—</div></div>
+        <div class="metric"><div class="k">声道</div><div class="v" id="mCh">—</div></div>
+        <div class="metric"><div class="k">分帧长度</div><div class="v" id="mFrame">—</div></div>
+        <div class="metric"><div class="k">单帧字节</div><div class="v" id="mFbytes">—</div></div>
+        <div class="metric"><div class="k">实时码率</div><div class="v" id="mKbps">—</div></div>
+        <div class="metric"><div class="k">实时帧率</div><div class="v" id="mFps">—</div></div>
+        <div class="metric"><div class="k">累计帧数</div><div class="v" id="mFrames">—</div></div>
+        <div class="metric"><div class="k">在线客户端</div><div class="v" id="mClients">—</div></div>
+      </div>
+      <div class="devinfo">
+        <span>捕获设备</span>
+        <span class="tag" id="mDevice">—</span>
+        <span class="tag" id="mCapRate">—</span>
+        <span class="tag" id="mErr"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>连接信息 <span class="hint">手机 / 平板扫这个码</span></h2>
+      <div class="linkrow">
+        <span class="tag acc" id="linkKind">—</span>
+        <span class="tag" id="linkProfile">—</span>
+      </div>
+      <div class="url" id="linkUrl">—</div>
+      <div class="qrbox"><img id="qr" alt="连接二维码" src=""></div>
+      <div class="btnrow" style="margin-top:12px">
+        <button id="btnCopy">复制地址</button>
+        <button id="btnRelink">重新探测链路</button>
+      </div>
+      <div class="altlist" id="altList"></div>
+      <ul class="warnlist" id="warnList"></ul>
+    </div>
+
+    <div class="card">
+      <h2>参数调节 <span class="hint">改动会重启采集</span></h2>
+      <div class="field">
+        <label for="selDevice">捕获设备</label>
+        <select id="selDevice"></select>
+      </div>
+      <div class="field">
+        <label for="selFrame">分帧长度</label>
+        <select id="selFrame"></select>
+      </div>
+      <div class="field">
+        <label for="selCh">声道数</label>
+        <select id="selCh">
+          <option value="2">2 声道（立体声）</option>
+          <option value="1">1 声道（省一半带宽）</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="selRate">推送采样率</label>
+        <select id="selRate">
+          <option value="0">跟随捕获（质量最好）</option>
+          <option value="48000">48000 Hz</option>
+          <option value="44100">44100 Hz</option>
+          <option value="32000">32000 Hz</option>
+          <option value="24000">24000 Hz</option>
+          <option value="16000">16000 Hz</option>
+          <option value="8000">8000 Hz</option>
+        </select>
+      </div>
+      <div class="btnrow" style="margin-top:14px">
+        <button class="primary" id="btnApply">应用参数</button>
+        <button id="btnPreset">套用推荐档</button>
+      </div>
+      <p class="note">
+        分帧越短、缓冲越薄，延迟越低，代价是抗抖动能力变弱。<b>有线链路</b>建议 10 ms，
+        <b>Wi-Fi</b> 建议 20 ms。修改后服务端会重启采集，已连接的播放页会自动重建缓冲。
+      </p>
+    </div>
+
+    <div class="card">
+      <h2>运行控制</h2>
+      <div class="btnrow stack">
+        <button class="primary wide" id="btnStart">启动采集</button>
+        <button class="wide" id="btnRestart">重启采集</button>
+        <button class="wide danger" id="btnStop">停止采集</button>
+      </div>
+      <div class="btnrow" style="margin-top:12px">
+        <button id="btnKick">断开所有客户端</button>
+        <button id="btnClearLog">清空日志</button>
+        <button class="danger" id="btnQuit">退出程序</button>
+      </div>
+      <p class="note">
+        停止采集后服务仍在监听，只是不再取音频。播放页会保持连接等待恢复。
+        <b>退出程序</b>会停掉整个服务——如果用无终端方式启动，这里是唯一的退出入口。
+      </p>
+    </div>
+
+    <div class="card span-all">
+      <h2>客户端 <span class="hint" id="clientHint">—</span></h2>
+      <table>
+        <thead>
+          <tr>
+            <th>#</th><th>设备</th><th>已连</th><th>已发帧</th><th>丢弃</th>
+            <th>链路 RTT</th><th>抖动</th><th>缓冲</th>
+          </tr>
+        </thead>
+        <tbody id="clientBody">
+          <tr><td colspan="8" class="empty">暂无客户端接入</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card span-all">
+      <h2>实时曲线 <span class="hint">最近 120 秒，每秒一个采样点</span></h2>
+      <div class="chart">
+        <div class="clabel"><span>码率</span><span id="kbpsNow">—</span></div>
+        <svg id="chartKbps" viewBox="0 0 600 56" preserveAspectRatio="none"></svg>
+      </div>
+      <div class="chart" style="margin-top:14px">
+        <div class="clabel"><span>帧率</span><span id="fpsNow">—</span></div>
+        <svg id="chartFps" viewBox="0 0 600 56" preserveAspectRatio="none"></svg>
+      </div>
+    </div>
+
+    <div class="card span-all">
+      <h2>运行日志 <span class="hint">最近 80 行</span></h2>
+      <pre class="log" id="logBox">—</pre>
+    </div>
+
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function(){
+  "use strict";
+
+  var $ = function(id){ return document.getElementById(id); };
+
+  var FRAME_OPTIONS = [5, 10, 20, 30, 40, 60, 100];
+  var KIND_LABEL = {
+    adb: "ADB 反向转发", tether: "USB 网络共享",
+    lan: "有线以太网", wifi: "Wi-Fi", none: "未发现链路"
+  };
+  var TIER_LABEL = { wired: "有线档", wireless: "无线档" };
+
+  var lastQrUrl = "";
+  var lastRev = -1;
+  var devicesLoaded = false;
+  var busy = false;
+  var exited = false;      // 已发起退出：停止轮询，别再报「失联」
+
+  function toast(msg){
+    var t = $("toast");
+    t.textContent = msg;
+    t.classList.add("show");
+    clearTimeout(toast._t);
+    toast._t = setTimeout(function(){ t.classList.remove("show"); }, 2400);
+  }
+
+  function fmtBytes(n){
+    if (n >= 1048576) return (n / 1048576).toFixed(1) + " MB";
+    if (n >= 1024) return (n / 1024).toFixed(1) + " KB";
+    return n + " B";
+  }
+
+  function fmtDur(s){
+    s = Math.round(s);
+    var h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = s % 60;
+    if (h > 0) return h + " 小时 " + m + " 分";
+    if (m > 0) return m + " 分 " + ss + " 秒";
+    return ss + " 秒";
+  }
+
+  // ---------- 曲线 ----------
+  function sparkline(svg, values, stroke, fill){
+    var W = 600, H = 56;
+    if (!values || values.length < 2){
+      svg.innerHTML = "";
+      return;
+    }
+    var max = 0, i;
+    for (i = 0; i < values.length; i++){ if (values[i] > max) max = values[i]; }
+    if (max <= 0) max = 1;
+    var step = W / (values.length - 1);
+    var pts = [], area = [];
+    for (i = 0; i < values.length; i++){
+      var x = (i * step).toFixed(1);
+      var y = (H - 3 - (values[i] / max) * (H - 8)).toFixed(1);
+      pts.push(x + "," + y);
+      area.push(x + "," + y);
+    }
+    area.push(W + "," + H);
+    area.push("0," + H);
+    svg.innerHTML =
+      '<polygon points="' + area.join(" ") + '" fill="' + fill + '"/>' +
+      '<polyline points="' + pts.join(" ") + '" fill="none" stroke="' + stroke +
+      '" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>';
+  }
+
+  // ---------- 渲染 ----------
+  function render(s){
+    var cap = s.capture || {}, cfg = s.config || {}, tot = s.totals || {};
+
+    var dotCls = "off", txt = "已停止采集";
+    if (cap.error){ dotCls = "err"; txt = "采集出错"; }
+    else if (cap.running){ dotCls = "on"; txt = "正在采集"; }
+    $("dot").className = "dot " + dotCls;
+    $("stateTxt").textContent = txt;
+    $("uptimeHint").textContent = "已运行 " + fmtDur(s.uptime || 0);
+
+    $("mRate").innerHTML = (cfg.rate || 0) + '<small> Hz</small>';
+    $("mCh").innerHTML = (cfg.channels || 0) + '<small> ch</small>';
+    $("mFrame").innerHTML = (cfg.frame_ms || 0) + '<small> ms</small>';
+    $("mFbytes").innerHTML = (cfg.frame_bytes || 0) + '<small> B</small>';
+    $("mKbps").innerHTML = Math.round(tot.kbps || 0) + '<small> kbps</small>';
+    $("mFrames").textContent = (tot.frames || 0).toLocaleString();
+    $("mClients").textContent = tot.clients || 0;
+
+    $("mDevice").textContent = cap.device || "未开始";
+    $("mCapRate").textContent = cap.capture_rate ? ("捕获 " + cap.capture_rate + " Hz") : "—";
+    var e = $("mErr");
+    if (cap.error){ e.textContent = cap.error; e.className = "tag bad"; }
+    else { e.textContent = ""; e.className = "tag"; }
+
+    // 链路
+    var lk = s.link || {}, prof = lk.profile || {};
+    $("linkKind").textContent = KIND_LABEL[lk.kind] || lk.kind || "—";
+    $("linkProfile").textContent = prof.tier
+      ? (TIER_LABEL[prof.tier] + " · 建议 " + prof.frame_ms + " ms / 缓冲 " + prof.buffer_ms + " ms")
+      : "—";
+
+    var url = lk.best_url || "";
+    $("linkUrl").textContent = url || "未发现可用链路";
+    if (url && url !== lastQrUrl){
+      lastQrUrl = url;
+      $("qr").src = "/api/qr.svg?data=" + encodeURIComponent(url) + "&t=" + Date.now();
+    } else if (!url){
+      lastQrUrl = "";
+      $("qr").removeAttribute("src");
+    }
+
+    var alt = (lk.links || []).filter(function(l){ return l.url !== url; });
+    var altBox = $("altList");
+    if (alt.length){
+      altBox.innerHTML = alt.map(function(l){
+        return '<div class="row"><span class="tag">' + (KIND_LABEL[l.kind] || l.kind) +
+          '</span><code>' + l.url + '</code><span>' + (l.label || "") + '</span></div>';
+      }).join("");
+    } else {
+      altBox.innerHTML = "";
+    }
+
+    var wl = $("warnList");
+    wl.innerHTML = (lk.warnings || []).map(function(w){
+      return "<li>" + w + "</li>";
+    }).join("") + (lk.error ? '<li>链路探测失败：' + lk.error + "</li>" : "");
+
+    // 客户端
+    var cl = s.clients || [];
+    $("clientHint").textContent = cl.length ? (cl.length + " 路在线") : "—";
+    var body = $("clientBody");
+    if (!cl.length){
+      body.innerHTML = '<tr><td colspan="8" class="empty">暂无客户端接入</td></tr>';
+    } else {
+      body.innerHTML = cl.map(function(c){
+        return "<tr><td>#" + c.id + "</td>" +
+          '<td class="ua" title="' + (c.ua || "") + '">' + (c.ua || "未知设备") + "</td>" +
+          "<td>" + fmtDur(c.since) + "</td>" +
+          "<td>" + c.sent_frames.toLocaleString() + "</td>" +
+          "<td>" + (c.dropped ? '<span class="tag bad">' + c.dropped + "</span>" : "0") + "</td>" +
+          "<td>" + (c.rtt_ms != null ? (c.rtt_ms + " ms") : "—") + "</td>" +
+          "<td>" + (c.jitter_ms != null ? ("±" + c.jitter_ms) : "—") + "</td>" +
+          "<td>" + (c.buffer_ms != null ? (c.buffer_ms + " ms") : "—") + "</td>" +
+          "</tr>";
+      }).join("");
+    }
+
+    // 曲线
+    var h = s.history || [];
+    var kbps = h.map(function(x){ return x.kbps; });
+    var fps  = h.map(function(x){ return x.fps; });
+    var now  = h.length ? h[h.length - 1] : {kbps: 0, fps: 0};
+    sparkline($("chartKbps"), kbps, "#185fa5", "rgba(24,95,165,0.13)");
+    sparkline($("chartFps"), fps, "#0f6e56", "rgba(15,110,86,0.13)");
+    $("kbpsNow").textContent = Math.round(now.kbps) + " kbps";
+    $("fpsNow").textContent = now.fps.toFixed(1) + " fps";
+
+    $("logBox").textContent = (s.log || []).join("\n") || "—";
+    $("logBox").scrollTop = $("logBox").scrollHeight;
+
+    // 参数控件跟随服务端状态（用户正在操作时不覆盖）
+    if (cfg.rev !== lastRev){
+      lastRev = cfg.rev;
+      $("selCh").value = String(cfg.channels);
+      $("selRate").value = String(cfg.requested_rate);
+      $("selFrame").value = String(cfg.frame_ms);
+      if (!$("selDevice").dataset.touched) $("selDevice").value = cfg.device || "";
+    }
+
+    $("btnStart").disabled = !!cap.running;
+    $("btnStop").disabled = !cap.running;
+    $("btnRestart").disabled = false;
+  }
+
+  function fail(err){
+    if (exited) return;
+    $("dot").className = "dot err";
+    $("stateTxt").textContent = "与控制台失联";
+    $("logBox").textContent = String(err);
+  }
+
+  // ---------- 数据 ----------
+  function poll(){
+    if (exited) return;
+    fetch("/api/status", {cache: "no-store"})
+      .then(function(r){ return r.json(); })
+      .then(render)
+      .catch(fail);
+  }
+
+  function loadDevices(){
+    fetch("/api/devices", {cache: "no-store"})
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        var sel = $("selDevice");
+        var opts = ['<option value="">默认扬声器（自动跟随）</option>'];
+        (d.loopback || []).forEach(function(n){
+          opts.push('<option value="' + n.replace(/"/g, "&quot;") + '">' + n + "</option>");
+        });
+        sel.innerHTML = opts.join("");
+        // 当前实际捕获的设备若不在列表里，补一条
+        if (d.current && (d.loopback || []).indexOf(d.current) === -1){
+          var o = document.createElement("option");
+          o.value = d.current;
+          o.textContent = d.current + "（当前）";
+          sel.appendChild(o);
+        }
+        sel.value = d.hint || (d.current || "");
+        devicesLoaded = true;
+      })
+      .catch(function(){ devicesLoaded = false; });
+  }
+
+  function post(url, body){
+    if (busy) return Promise.resolve(null);
+    busy = true;
+    return fetch(url, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(body || {})
+    })
+      .then(function(r){ return r.json(); })
+      .then(function(j){
+        busy = false;
+        return j;
+      })
+      .catch(function(e){ busy = false; toast("操作失败：" + e); return null; });
+  }
+
+  // ---------- 事件 ----------
+  $("btnRefresh").addEventListener("click", function(){ poll(); toast("已刷新"); });
+
+  $("btnCopy").addEventListener("click", function(){
+    var url = $("linkUrl").textContent;
+    if (!url || url === "未发现可用链路"){ toast("还没有可用地址"); return; }
+    if (navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(url).then(function(){ toast("已复制：" + url); },
+                                             function(){ toast(url); });
+    } else { toast(url); }
+  });
+
+  $("btnRelink").addEventListener("click", function(){
+    toast("正在重新探测…");
+    post("/api/control", {action: "refresh_link"}).then(function(j){
+      if (j) { render(j); toast("探测完成"); }
+    });
+  });
+
+  $("btnApply").addEventListener("click", function(){
+    post("/api/config", {
+      device: $("selDevice").value,
+      frame_ms: parseInt($("selFrame").value, 10),
+      channels: parseInt($("selCh").value, 10),
+      rate: parseInt($("selRate").value, 10)
+    }).then(function(j){
+      if (!j) return;
+      render(j);
+      if (j.rejected && j.rejected.length) toast("部分被拒绝：" + j.rejected.join("；"));
+      else if (j.changed && j.changed.length) toast("已应用：" + j.changed.join("、"));
+      else toast("参数未变化");
+    });
+  });
+
+  $("btnPreset").addEventListener("click", function(){
+    fetch("/api/status", {cache: "no-store"}).then(function(r){ return r.json(); })
+      .then(function(s){
+        var prof = (s.link && s.link.profile) || {};
+        if (!prof.frame_ms){ toast("暂无推荐档"); return; }
+        post("/api/config", {frame_ms: prof.frame_ms}).then(function(j){
+          if (!j) return;
+          render(j);
+          toast("已套用推荐分帧 " + prof.frame_ms + " ms");
+        });
+      });
+  });
+
+  $("btnStart").addEventListener("click", function(){
+    post("/api/control", {action: "start"}).then(function(j){ if (j){ render(j); toast("已启动采集"); } });
+  });
+  $("btnStop").addEventListener("click", function(){
+    post("/api/control", {action: "stop"}).then(function(j){ if (j){ render(j); toast("已停止采集"); } });
+  });
+  $("btnRestart").addEventListener("click", function(){
+    post("/api/control", {action: "restart"}).then(function(j){ if (j){ render(j); toast("已重启采集"); } });
+  });
+  $("btnKick").addEventListener("click", function(){
+    post("/api/control", {action: "disconnect_clients"}).then(function(j){
+      if (j){ render(j); toast("已断开所有客户端"); }
+    });
+  });
+  $("btnClearLog").addEventListener("click", function(){
+    post("/api/control", {action: "clear_log"}).then(function(j){
+      if (j){ render(j); toast("日志已清空"); }
+    });
+  });
+
+  $("btnQuit").addEventListener("click", function(){
+    if (!window.confirm("确定要退出外置扬声器服务吗？\n\n" +
+        "退出后播放页会立即断开，需要重新双击启动程序。")) return;
+    exited = true;
+    $("dot").className = "dot off";
+    $("stateTxt").textContent = "服务已退出";
+    $("clientHint").textContent = "—";
+    $("clientBody").innerHTML = '<tr><td colspan="8" class="empty">服务已退出</td></tr>';
+    $("logBox").textContent =
+      "服务已退出。\n\n重新启动：\n" +
+      "  · 无终端：双击 run-silent.vbs\n" +
+      "  · 带终端：双击 run.bat\n" +
+      "  · 兜底关闭：双击 stop.bat";
+    toast("正在关闭服务…");
+    fetch("/api/control", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({action: "shutdown"})
+    }).catch(function(){});
+  });
+
+  $("selDevice").addEventListener("change", function(){ this.dataset.touched = "1"; });
+
+  // ---------- 初始化 ----------
+  var opts = FRAME_OPTIONS.map(function(v){
+    return '<option value="' + v + '">' + v + " ms</option>";
+  });
+  $("selFrame").innerHTML = opts.join("");
+
+  loadDevices();
+  poll();
+  setInterval(poll, 1000);
+  setInterval(function(){ if (!devicesLoaded) loadDevices(); }, 15000);
+})();
+</script>
+</body>
+</html>

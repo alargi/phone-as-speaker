@@ -1,0 +1,4 @@
+numpy>=1.24
+soundcard>=0.4.2
+aiohttp>=3.9
+qrcode>=7.4

@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-page-node-id="gN1pDSxC1UkIqDilC5irc5">
+<head data-page-node-id="iqXSnSijP8LMua97EplUBL">
+<meta charset="UTF-8" data-page-node-id="FrTgiDKNPVV1D2dmYxRxzV">
+<meta name="viewport" content="width=device-width, initial-scale=1" data-page-node-id="bC3MTXNvFqbZ0C50pMks0w">
+<title>spacedesk 全链技术原理分析</title>
+<style>
+  :root{
+    --bg:#faf9f6; --card:#ffffff; --line:#e6e4dd; --line2:#d4d1c8;
+    --tx:#22221f; --tx2:#5f5e5a; --tx3:#8b8a84;
+    --blue-bg:#e6f1fb; --blue:#185fa5; --blue-d:#0c447c;
+    --teal-bg:#e1f5ee; --teal:#0f6e56; --teal-d:#085041;
+    --amber-bg:#faeeda; --amber:#ba7517; --amber-d:#633806;
+    --red-bg:#fcebeb; --red:#a32d2d; --red-d:#791f1f;
+    --purple-bg:#eeedfe; --purple:#534ab7; --purple-d:#3c3489;
+    --gray-bg:#f1efe8; --gray:#5f5e5a;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--tx);
+    font-family:-apple-system,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    font-size:15px; line-height:1.75;
+  }
+  .wrap{max-width:980px; margin:0 auto; padding:48px 28px 80px}
+  h1{font-size:28px; font-weight:600; margin:0 0 8px; letter-spacing:-.3px}
+  .sub{color:var(--tx2); font-size:14px; margin:0 0 6px}
+  .meta{color:var(--tx3); font-size:13px; border-bottom:1px solid var(--line); padding-bottom:22px; margin-bottom:34px}
+  h2{
+    font-size:20px; font-weight:600; margin:46px 0 16px; padding-left:12px;
+    border-left:3px solid var(--blue); letter-spacing:-.2px;
+  }
+  h3{font-size:16px; font-weight:600; margin:28px 0 10px; color:#2f2f2b}
+  h4{font-size:14px; font-weight:600; margin:20px 0 8px; color:var(--tx2)}
+  p{margin:10px 0}
+  ul,ol{margin:10px 0; padding-left:22px}
+  li{margin:5px 0}
+  code{
+    font-family:"Cascadia Mono",Consolas,"SF Mono",Menlo,monospace;
+    background:var(--gray-bg); padding:2px 6px; border-radius:4px;
+    font-size:13px; color:#3c3c38;
+  }
+  pre{
+    background:#f5f3ee; border:1px solid var(--line); border-radius:8px;
+    padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.6;
+    font-family:"Cascadia Mono",Consolas,Menlo,monospace; color:#3c3c38;
+  }
+  table{width:100%; border-collapse:collapse; margin:16px 0; font-size:14px; background:var(--card)}
+  th,td{border:1px solid var(--line); padding:9px 12px; text-align:left; vertical-align:top}
+  th{background:var(--gray-bg); font-weight:600; font-size:13px; color:#3c3c38; white-space:nowrap}
+  td code{background:transparent; padding:0; font-size:12.5px}
+  tbody tr:nth-child(even){background:#fcfbf8}
+  .tag{
+    display:inline-block; font-size:11.5px; padding:1px 7px; border-radius:20px;
+    font-weight:600; vertical-align:1px; margin-right:6px; white-space:nowrap;
+  }
+  .t-official{background:var(--teal-bg); color:var(--teal-d)}
+  .t-infer{background:var(--blue-bg); color:var(--blue-d)}
+  .t-doubt{background:var(--amber-bg); color:var(--amber-d)}
+  .t-wrong{background:var(--red-bg); color:var(--red-d)}
+  .callout{
+    border:1px solid var(--line); border-left:3px solid var(--blue);
+    background:var(--card); border-radius:8px; padding:14px 18px; margin:18px 0;
+  }
+  .callout.warn{border-left-color:var(--amber)}
+  .callout.bad{border-left-color:var(--red)}
+  .callout.good{border-left-color:var(--teal)}
+  .callout .ct{font-weight:600; font-size:14px; margin-bottom:4px}
+  .callout.warn .ct{color:var(--amber-d)}
+  .callout.bad .ct{color:var(--red-d)}
+  .callout.good .ct{color:var(--teal-d)}
+  .callout .ct{color:var(--blue-d)}
+  .flow{display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:18px 0}
+  .fbox{
+    flex:1 1 150px; min-width:140px; border-radius:8px; padding:10px 12px;
+    font-size:13.5px; font-weight:600; text-align:center; border:1px solid;
+  }
+  .fbox small{display:block; font-weight:400; font-size:12px; margin-top:2px; opacity:.85}
+  .fb-blue{background:var(--blue-bg); border-color:#a9cdec; color:var(--blue-d)}
+  .fb-amber{background:var(--amber-bg); border-color:#eccb93; color:var(--amber-d)}
+  .fb-teal{background:var(--teal-bg); border-color:#9bd7c4; color:var(--teal-d)}
+  .fb-purple{background:var(--purple-bg); border-color:#c3c0ee; color:var(--purple-d)}
+  .fb-gray{background:var(--gray-bg); border-color:var(--line2); color:#2c2c2a}
+  .arw{color:var(--tx3); font-size:16px; flex:0 0 auto}
+  .grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px; margin:18px 0}
+  .metric{background:var(--card); border:1px solid var(--line); border-radius:8px; padding:14px 16px}
+  .metric .k{font-size:12.5px; color:var(--tx3); margin-bottom:4px}
+  .metric .v{font-size:22px; font-weight:600; letter-spacing:-.5px}
+  .metric .n{font-size:12.5px; color:var(--tx2); margin-top:4px}
+  .layer{border:1px solid var(--line); border-radius:8px; padding:10px 14px; margin:6px 0; background:var(--card); font-size:14px}
+  .layer .lname{font-weight:600}
+  .layer .lfile{float:right; color:var(--tx3); font-size:12.5px; font-family:Consolas,monospace}
+  .boundary{
+    text-align:center; font-size:12px; color:var(--amber-d); background:var(--amber-bg);
+    border-top:1px dashed var(--amber); border-bottom:1px dashed var(--amber);
+    padding:5px 0; margin:10px 0; letter-spacing:.5px;
+  }
+  .foot{margin-top:52px; padding-top:20px; border-top:1px solid var(--line); color:var(--tx3); font-size:13px}
+  @media print{
+    body{background:#fff} .wrap{padding:0; max-width:none} h2{page-break-after:avoid} table{page-break-inside:avoid}
+  }
+</style>
+</head>
+<body data-page-node-id="ywaX1xBhGgpFSHI1iI7Koa">
+<div class="wrap" data-page-node-id="QeAgzNUXMlWz5bs4RMpuVl">
+
+<h1 data-page-node-id="VQiy6k5rHO7V4LEjPGQ2mM">spacedesk 全链技术原理分析</h1>
+<p class="sub" data-page-node-id="OjIkKB26Cc9uFYo8SwhNM5">从虚拟显示器枚举到像素过网、触控回传的端到端拆解</p>
+<p class="meta" data-page-node-id="z6Knqw7aOKV8QblJxi0vfJ">
+  分析对象：spacedesk（datronicsoft）Windows 主控端 + 跨平台 Viewer ·
+  事实依据：spacedesk 官方用户手册 / SDK 说明 / 官方论坛答复 · 整理时间：2026-09
+</p>
+
+<h2 data-page-node-id="Hzz3A9GHFqp3xwpC70s00D">0. 结论速览</h2>
+<div class="grid" data-page-node-id="KSGvfaSYlOg1YHdxeSnXEJ">
+  <div class="metric" data-page-node-id="A0HCjBTxuisJWzJTgFfjqc"><div class="k" data-page-node-id="8ng6hQsuwGZxMt3AXfWKG2">架构范式</div><div class="v" data-page-node-id="Z34zCuG3ij6IrcypWp0cWR">C/S + 虚拟显示适配器</div><div class="n" data-page-node-id="Tbjt8yFmFbCY6yJXYIcNdE">不是投屏，是"多一块显示器"</div></div>
+  <div class="metric" data-page-node-id="Nno1LudttiC00drgdCcHy3"><div class="k" data-page-node-id="xwFW23lEwpDVF21GZa5ujE">Win10 驱动形态</div><div class="v" data-page-node-id="uPvKBFJGADSagokmjLQt5b">IddCx / UMDF</div><div class="n" data-page-node-id="EWsCVtTlj4zBXm2YnptA0A">用户态间接显示驱动</div></div>
+  <div class="metric" data-page-node-id="xjpEiZOgiFXm5Gj3W6ZnoC"><div class="k" data-page-node-id="3U1dJBUdFv58jPlhQTkCFO">网络端口</div><div class="v" data-page-node-id="bsGKxJt5J4tn9t7YYF7aEf">28252</div><div class="n" data-page-node-id="5z4NXNKgo2VrhbBSvBKvF1">TCP，UDP 同号用于发现</div></div>
+  <div class="metric" data-page-node-id="dzXWaZGEbAkq1Uk1EM4FFA"><div class="k" data-page-node-id="BkHaGtn6tDnfA4XebE3JFn">并发上限</div><div class="v" data-page-node-id="wsWxJ4CRDYjyLOVoWnkKpV">16 + 1</div><div class="n" data-page-node-id="zE1gmqDUmlTfvdDNWWg7LE">16 个原生 Viewer + 1 个 HTML5</div></div>
+</div>
+
+<ol data-page-node-id="BiBwbWwIR3B0IHr0tUTRzr">
+  <li data-page-node-id="4XU2FrDBw9fiPGDQqpqqE1"><b data-page-node-id="JQkh4OgfKuAVBT1t5EF4wN">核心机制是"注册显示器"，不是"抓屏幕"。</b>驱动向 Windows 上报一块虚拟显示适配器，DWM 把桌面（含这块虚拟屏）正常合成后，帧经交换链直接交付给 spacedesk，<b data-page-node-id="FpK40FM8tnm5j3kWN05jxP">不经过任何截屏 API</b>。这是它与 VNC / RDP / 截屏类方案的本质区别。</li>
+  <li data-page-node-id="BxnilBALWj61o2z8f7363U"><b data-page-node-id="Soa5zIuBXMRvXZtxvfEvIp">全链路五段：</b>虚拟显示器枚举 → 帧交付与处理 → 帧内压缩 → TCP/UDP 传输 → 客户端解码渲染；再加一条<b data-page-node-id="CRBaBH87uwOpjjBduqRKbl">反向输入回路</b>（触摸/笔/键鼠 → 虚拟 HID 注入）。</li>
+  <li data-page-node-id="zUyrJ2JI8gLjV4j4PdQZgp"><b data-page-node-id="LCHfcHOxZNmquf3DRTbk7A">压缩是件内（intra-frame）有损压缩，不是 H.264。</b>官方参数为 YUV 4:4:4 / 4:2:2 / 4:2:0 色度子采样 + 0~100 质量滑块，且允许关闭压缩走 RGBA 32 位。<b data-page-node-id="lshSPN3ogDl7dc6HXnifZR">网上"H.264 硬件编码"的说法在官方资料中找不到依据，且与带宽口径矛盾</b>（详见第 4 节）。</li>
+  <li data-page-node-id="yLeVTVq3iWMBIpaNrON9V3"><b data-page-node-id="wBMCvJhuupOkW8mLN2kXJL">传输明文无加密。</b>官方明确说明客户端与服务端之间不加密，同网段内他人可抓取画面内容。</li>
+  <li data-page-node-id="VoTLp9ZjOPuqSR4uZxSDZq"><b data-page-node-id="cf9hURDEyg5SawNR9alg60">最大工程约束来自显示栈独占性。</b>同类 hook 式显示驱动（DisplayLink、Duet Display、Splashtop XDisplay 等）与 spacedesk 不能共存。</li>
+</ol>
+
+<h2 data-page-node-id="6Fk2RmcCLKDxliLs8mAJ2P">1. 系统模型与角色划分</h2>
+<p data-page-node-id="VZ6LtEOOnewIKVxdKgdd7J">spacedesk 是标准的 C/S 结构，但服务端的角色远不止"服务进程"——它还向操作系统伪装了硬件。</p>
+
+<div class="flow" data-page-node-id="y6VKUaLBKvWT5L49kk1Gny">
+  <div class="fbox fb-blue" data-page-node-id="bpb7TvAsrZTAF3GmYDd8lb">主计算机 Primary<small data-page-node-id="saJ3PHFe8GC0PrDsg33xu3">Windows 10/11 · 驱动 + 服务</small></div>
+  <div class="arw" data-page-node-id="JEKRbYdJepu7mGDWLAPLmg">→</div>
+  <div class="fbox fb-teal" data-page-node-id="YK5VYGFIb5qOsz16I1h7ha">局域网 LAN<small data-page-node-id="MIWFSfCU4A9tFzv0stFKY3">以太网 / Wi-Fi / USB 网络共享</small></div>
+  <div class="arw" data-page-node-id="kMwIWIrAhp79FNBCjtZkjG">→</div>
+  <div class="fbox fb-purple" data-page-node-id="aF6BzyBHnfO6etf0AUNz88">辅助设备 Secondary<small data-page-node-id="gVTUlKVDZLeF3tgE8zZhy0">Android / iOS / Windows / 浏览器</small></div>
+</div>
+
+<pre data-page-node-id="UFdz32k2KHhNYGzU2IAlRW">PRIMARY 侧组件：
+  spacedeskService.exe        核心服务，捕获→压缩→传输 与 会话管理
+  spacedesk Graphics Adapter  虚拟显示适配器（出现在设备管理器"显示适配器"下）
+  spacedesk virtual HID Device 虚拟 HID 设备（承载回传的触摸/键鼠）
+
+SECONDARY 侧组件：
+  spacedesk VIEWER 应用        Android / iOS / Windows 三端原生应用
+  spacedesk HTML5 VIEWER       浏览器访问，零安装</pre>
+
+<h3 data-page-node-id="zLycpq4QNGVUmd7Qby9EHR">官方文档明确列出的组件文件清单（Windows 10）</h3>
+<table data-page-node-id="hyLhgoUM243SqgEEezAd1f">
+  <thead data-page-node-id="UtnGVy7MJBLOGqJRkuAqVf"><tr data-page-node-id="x3BaqlFJAhVbq9AKVaD976"><th data-page-node-id="4aYYNCGiGPgPH6URkmi7oo">文件</th><th data-page-node-id="BFtSPBidBHlNiLeGwZQPOw">路径</th><th data-page-node-id="manZnPgJwXBMlKWVhVAAJN">作用</th></tr></thead>
+  <tbody data-page-node-id="zjGVBMae8dZHafwV6qrhY0">
+    <tr data-page-node-id="wHgo4YVWZJ5G8nI2AQOc6R"><td data-page-node-id="hmh9IhcGNPcZBl7tw1Qms3"><code data-page-node-id="TH9738uAHJ77fIfAuI6sK4">spacedeskDisplayUmode1_2.dll</code></td><td data-page-node-id="v3iHniAOnBAxrxyCpEStoI"><code data-page-node-id="aXXA7HvvzkOizNGgjn8V8o">System32\drivers\UMDF\</code></td><td data-page-node-id="Vir9HXu5vHABF5hGiZaihK">虚拟显示驱动主体（Win10 1709+；1607–1703 为 <code data-page-node-id="08rNOdvGX1OrgmTaeSFN1g">_1_0</code>）</td></tr>
+    <tr data-page-node-id="GcHnGMx7CRj2gfH2OGIDut"><td data-page-node-id="P6gqQWj5DHaaAmDZiIsprQ"><code data-page-node-id="PjdcTzkTCHD2CuuRcK9mFW">spacedeskDriverHid.dll</code></td><td data-page-node-id="3MCJuJJ4eKuajsss9WQZD7"><code data-page-node-id="ZWfbk9V1tnQzBeKrIOCKTH">System32\drivers\UMDF\</code></td><td data-page-node-id="OpQIAVW1bHfZQQ1iZdlQso">虚拟 HID 驱动（输入回传落点）</td></tr>
+    <tr data-page-node-id="JAxCrQROHuvsr3qnze0r7v"><td data-page-node-id="TaxauI4ExF5DeFEZAm9D70"><code data-page-node-id="CfIaMr5zFwjCLC7gbP2DN1">spacedeskKtmInputMouse.sys</code></td><td data-page-node-id="bs5NCtucdsQLjELS6p3sP7"><code data-page-node-id="xxoS98KRkFrHV7NM0bbtzs">System32\drivers\</code></td><td data-page-node-id="h4duqrOEVLwHGXJwsfKE4P">虚拟鼠标设备</td></tr>
+    <tr data-page-node-id="rLQbGSjliTDGHDyEOFG7Le"><td data-page-node-id="qgokEg2DsLtEEj1mqm8JCv"><code data-page-node-id="h7lMFz4TrgmUztzaxx0iAf">spacedeskKtmInputKeybd.sys</code></td><td data-page-node-id="93sPukUiswu4LDHFGJfpqO"><code data-page-node-id="ByJavrjcrIL7tnaiCbktVW">System32\drivers\</code></td><td data-page-node-id="Vyfyj8XtmoxpZh1uw2oBZu">虚拟键盘设备</td></tr>
+    <tr data-page-node-id="njtQxxolfo8atu7hWibg2J"><td data-page-node-id="aEE8PrzFj9AAOFP4FCvvpE"><code data-page-node-id="nctrM0bf70P6IuREK7t99T">spacedeskService.exe</code></td><td data-page-node-id="v8Hc2LWoOj2u2eQDSVmbOA"><code data-page-node-id="ra6gilvOSh98j8BtrJW5Rn">System32\</code></td><td data-page-node-id="gMoRTLC9lyadAE40SBpBPr">核心服务进程（防火墙需放行此文件）</td></tr>
+    <tr data-page-node-id="rVWQViTCg4vmJQC8ANyu0B"><td data-page-node-id="2IREdkrnqalJn3lQs3eiQr"><code data-page-node-id="3nEFEcCAXFYtntf5sKgNUF">spacedeskSrvLibConnectorUsb.dll</code></td><td data-page-node-id="4CdcCKQjqWPSVkZPUJ4PMZ"><code data-page-node-id="fDKk3ahWaD6QPT4RAglAs2">System32\</code></td><td data-page-node-id="DOyy6LcLPNpis1Fika5lta">USB 连接通道库</td></tr>
+    <tr data-page-node-id="UDJ5rdexqvLiTp55IgUvhn"><td data-page-node-id="6cIxxbIft9owEiQcTlIZ3m"><code data-page-node-id="trfnIVjApOBZCzv9x0Znu8">spacedeskServiceTray.exe</code></td><td data-page-node-id="f93KLXagC1VxcEN3ad0DXT"><code data-page-node-id="VKGSFq1oDiKs8J0YekAQNG">System32\</code></td><td data-page-node-id="WagaBDKBdX3duIElmJJk7Z">托盘图标与控制台入口</td></tr>
+    <tr data-page-node-id="7W4SeaMFAjKFOyubjIACAW"><td data-page-node-id="Bf1dsLNLkMpX8LkumdDMTr"><code data-page-node-id="UIu9RTL1V9J6YKeG8fZlgO">spacedeskHookKmode.sys</code></td><td data-page-node-id="0LYZNByBcFtABGTqafshtv"><code data-page-node-id="onXwKyx9sxvVT0J9j8IFtY">System32\drivers\</code></td><td data-page-node-id="91o8BwormetPCG325bgFAc"><b data-page-node-id="nUlsntVq9wesAyPkHwOiw2">仅 Win 8.1/7</b> 的 WDDM 过滤钩子驱动</td></tr>
+  </tbody>
+</table>
+
+<h2 data-page-node-id="5bbP2IssBPBQZt28hWatLo">2. 第一段：虚拟显示器枚举（全链的"地基"）</h2>
+<p data-page-node-id="2Fnq43LZb6L7ReF0rEOECD">Windows 认为"有几块屏"，取决于显示适配器驱动的上报。spacedesk 的做法是加载一个符合 WDDM 规范的虚拟显示适配器，让图形子系统把它当作真实显卡。</p>
+
+<div class="callout good" data-page-node-id="xG1SYyjh5KP616jmTKCHia">
+  <div class="ct" data-page-node-id="izeBj9ZeaQuzfWNqOKAQ7C">为什么这一步是整个方案的支点</div>
+  <p style="margin:0" data-page-node-id="6haZOU99wN7HHARUEjZyUE">一旦系统承认了这块屏幕，后续所有事都变成"Windows 的正常多屏行为"：你可以在显示设置里拖动它的相对位置、设分辨率与缩放、按 Win+P 切扩展/复制、把窗口拖进去运行。spacedesk 不需要模拟窗口系统，也不需要猜"哪块区域变了"。</p>
+</div>
+
+<h3 data-page-node-id="uXCD8E7tnMMCYVSAMBcBHG">两条驱动技术路线</h3>
+<table data-page-node-id="mCWbV7ML1PemNmCSu0Nnud">
+  <thead data-page-node-id="oEWUBrRQb1nQBy0yE3GVi4"><tr data-page-node-id="nBZFB04RXyNTCtYVpaXUPM"><th data-page-node-id="SlV6xoI4svP8TT3DIYE93Z">系统</th><th data-page-node-id="GciCLpDjGHpVLtcB0KhPHJ">驱动模型</th><th data-page-node-id="EEI3e2YFciKpOJHeLayWP5">运行模式</th><th data-page-node-id="HT18j7nSpelDxArCAtUy0I">特征</th></tr></thead>
+  <tbody data-page-node-id="9ahHd6JDKS8CDTQRPZmDxH">
+    <tr data-page-node-id="PBbGE4VjTETBlFMz7srqko">
+      <td data-page-node-id="UAl4rBkbO1ceAH0lFGzFsr">Windows 10 (1607+)</td>
+      <td data-page-node-id="wpJio7BrQJsM0jidhlZFGY"><b data-page-node-id="7B7ILnTalSeIvBdkFOjP0n">WDDM IddCx 间接显示驱动</b><br data-page-node-id="A3Kc46CXxgcQHShvwTKl2h"><span class="tag t-official" data-page-node-id="S7CwJZV6MDl37pzB08eTNY">官方</span></td>
+      <td data-page-node-id="BYzNreLMcqq2NGRusuQDPG">用户态（UMDF）</td>
+      <td data-page-node-id="exUJNsgP397ThBsEmqW8Ec">微软为"软件显示器"提供的正规接口，驱动逻辑跑在用户态，崩溃不蓝屏；只需 WDDM 1.1 以上 + DirectX 9 以上</td>
+    </tr>
+    <tr data-page-node-id="XT0SeNHMwTpYLKGRgZOmxE">
+      <td data-page-node-id="RxbLz7MPfHx4Vjb71OBX18">Windows 8.1 / 7</td>
+      <td data-page-node-id="oDCc1o8hWv7mX1AxGRV11o"><b data-page-node-id="XRG5IzqrTSxlF52ei6kve4">WDDM Filter Hook 显示驱动</b><br data-page-node-id="RfWsnnI3FjHnbU5u4Cejah"><span class="tag t-official" data-page-node-id="3ZpmbcwHFq6yJAubh2lQF1">官方</span></td>
+      <td data-page-node-id="QRlQ2Go10nTeNrWVyuhBnW">内核态（KMode）</td>
+      <td data-page-node-id="GAGEg769jWForYmHvb4k0y">钩住已有显示驱动的调用链；与其它同类 hook 产品硬冲突，稳定性与兼容性都明显更差</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3 data-page-node-id="fIhEViXVe7RPolGequAB3A">显示栈分层与特权边界</h3>
+<div class="layer" data-page-node-id="bsYYmpvDc5DARtF9hTzHp0"><span class="lname" data-page-node-id="gDPFR1ikvd8AhBM1w8Zo31">应用程序与桌面窗口</span><span class="lfile" data-page-node-id="wCzjpovSAivF9Xue8i4mqG">GDI / D3D</span></div>
+<div class="layer" data-page-node-id="ORv0pXftpdoJNd28HRAguG"><span class="lname" data-page-node-id="UPPnBVYt2ohcMGZP397vQP">DWM 桌面合成器</span><span class="lfile" data-page-node-id="O58QGwRSe3TxJGPNhfDQA0">DWM.exe</span></div>
+<div class="layer" data-page-node-id="5bvlUHIrNA5rQmMxgxc70t"><span class="lname" data-page-node-id="LPvWFiNtiTM4P7jTaRH9CA">dxgkrnl.sys · WDDM 显示栈</span><span class="lfile" data-page-node-id="Ho784FGhe4v3KP1aZbwzHi">内核态</span></div>
+<div class="boundary" data-page-node-id="22F210ORp9NoMDrJdyCshq">用户态 / 内核态 分界 —— IddCx 把显示驱动主体搬到了上方</div>
+<div class="layer" data-page-node-id="Mpp9OUIV2rjts5Zi8sCi0q"><span class="lname" data-page-node-id="sVi5vYqJP2mxJFGr5mRysm">spacedesk 虚拟显示适配器</span><span class="lfile" data-page-node-id="NHY3yJpaF4K3imuYo6PLVU">UMDF / IddCx</span></div>
+<div class="layer" data-page-node-id="MFMzL9QfOLRmGV1h9RdE8V"><span class="lname" data-page-node-id="BEhqThqVZE12tsLvJYgSyI">spacedeskService.exe</span><span class="lfile" data-page-node-id="jBMS1L9SDveD8hWwD42UhT">编码 + 会话</span></div>
+<div class="layer" data-page-node-id="BEzVRC7kN7SNZYEoeCJzi1"><span class="lname" data-page-node-id="U5n7pYHAi0ISQMTE47yOWx">网络传输层</span><span class="lfile" data-page-node-id="reCSJXsI6IETWnSc1FSfFG">TCP / UDP 28252</span></div>
+
+<p data-page-node-id="b7m0IbHmc4JD3eGperpTOl"><b data-page-node-id="8vH5bEhyHjHMYmB5tnY0GL">工程含义：</b>因为驱动主体在用户态，spacedesk 不需要签内核驱动级别的兼容性妥协，出问题时服务可以被终止而不会拖垮系统；代价是帧数据要跨一次用户态/内核态边界，且必须依赖 IddCx 框架提供的表面（surface）交付机制。</p>
+
+<h2 data-page-node-id="Iig54xL1tXjaKLxWGSJFht">3. 第二段：帧交付——为什么不需要截屏 API</h2>
+<p data-page-node-id="CI4VJPMn4zOJE7GMMWBsNq">这是整个方案最容易被误解的一环。三种"把画面拿到手"的思路对比：</p>
+
+<table data-page-node-id="0ScxBupEcSDeykWUUoVlN6">
+  <thead data-page-node-id="Z5SnmG3pDyZ4jKh7lzswBx"><tr data-page-node-id="1uyJtKiTXHoW4iS1z3AOOv"><th data-page-node-id="43aLqzZHnQKact2CJ9kNGv">机制</th><th data-page-node-id="J5CuK7rSNeoecB7nOD6Vnp">代表方案</th><th data-page-node-id="hvdJbc1m6W3SlntsrFhEro">传什么</th><th data-page-node-id="aw4Pz7zOMFQIR8RU1QZNV4">代价</th></tr></thead>
+  <tbody data-page-node-id="p7YOOReZv8DB8GypfO5QmO">
+    <tr data-page-node-id="RQU42y6xhkuwUPp4EIW4bI">
+      <td data-page-node-id="88eBvwG5RfUPAwFeKbutvo">传绘制指令</td><td data-page-node-id="MyBn2RFEnhX4vPS0KdCKdH">RDP、X11、部分 VNC 模式</td>
+      <td data-page-node-id="DUCtCQo3alukfaELkHRm1p">窗口/字体/坐标等语义指令，客户端重建界面</td>
+      <td data-page-node-id="wKCzeuwOEs02yYcnLXyCDx">带宽省，但画面与本地不完全一致；高动态场景失真明显，不适合"当第二块屏"</td>
+    </tr>
+    <tr data-page-node-id="EvICd1mJE18YY1gAivTRB2">
+      <td data-page-node-id="cHV6gxeHBjWM8GNtPoM3ov">传像素（抓屏）</td><td data-page-node-id="dpQk2olL2uD9gaY2AYIfdj">VNC、多数截屏式投屏、DXGI Desktop Duplication</td>
+      <td data-page-node-id="oTL5GZDJlCTaexzbucGumu">已合成的桌面位图</td>
+      <td data-page-node-id="iAaeMV7Rsuhi5m5TdBVrRi">需额外一次显存→内存拷贝；CPU/带宽压力大，帧率与延迟受抓屏节拍制约</td>
+    </tr>
+    <tr data-page-node-id="ECNIGfYulgdeuJ7JGm6s7z">
+      <td data-page-node-id="HpktHabNAt5p5M5kwMWzfE"><b data-page-node-id="JzHZDpJyhNMCGNGeUj3zcw">进合成路径</b></td><td data-page-node-id="0S5udsfPMNYPRZWDqETy1T"><b data-page-node-id="UvuLT52Dayh7eQAQE0GoFB">spacedesk（IddCx）</b></td>
+      <td data-page-node-id="zWUI68jlB0u2oThgaiaMS5">虚拟屏自身输出的合成结果</td>
+      <td data-page-node-id="apQa8LMEymvi5sl5Hhb9nt">无需截屏 API，也无需猜测变化区域；代价是必须占用一个"显示器名额"并独占显示栈钩子</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="callout" data-page-node-id="CTFkWSFYmYzcT4MaRbl9TF">
+  <div class="ct" data-page-node-id="i5Gudv3Flq6cg6a09qiqzD">关键推论</div>
+  <p style="margin:0" data-page-node-id="GR5zZtHYQlGhrnmBzkrvCt">spacedesk 之所以能在 60fps 下保持较低 CPU 占用，并不是因为编码有多强，而是因为它在<b data-page-node-id="RjdFzNguNwNULsMsXEVOl3">数据产生的地方直接取数</b>，省掉了整条"显示输出 → 显存 → 系统内存 → 编码器"的中间搬运链。反过来，这也解释了为什么它无法用于"远程访问一台没有安装驱动的机器"——没有虚拟显示器，就没有数据源。</p>
+</div>
+
+<h4 data-page-node-id="6Sxo08HUwABGRUdp9NTVg6">帧进入服务后的处理</h4>
+<ol data-page-node-id="jau4Q56Nhuwd4x2hPfvoeR">
+  <li data-page-node-id="C1uiKqE7sTtFqluCO5OgOP">DWM 按节拍合成桌面，虚拟显示器对应的表面被填充；</li>
+  <li data-page-node-id="6LpAgmLjwGedWgJ0mIG3Du">IddCx 框架把该表面交付给 spacedesk 的用户态驱动；</li>
+  <li data-page-node-id="E3YQDfrgRO6A3ENJONjz5b">色彩空间转换（RGB → YUV）与色度子采样（按设置的 4:4:4 / 4:2:2 / 4:2:0）；</li>
+  <li data-page-node-id="eeiywzhR6PtjoajHVyvONd">按质量参数做帧内压缩，产出待发送的图像数据；</li>
+  <li data-page-node-id="l3QlRehDQhJy67CDDCqbhq">交给 <code data-page-node-id="MoMbmKoy2gsT1YoQiWOzlE">spacedeskService.exe</code> 打包发送。</li>
+</ol>
+
+<h2 data-page-node-id="a7K9khH4khOMGHhVT8ootK">4. 第三段：压缩编码——需要纠正的一个流行误解</h2>
+
+<div class="callout bad" data-page-node-id="4r14m3T6KFHAY9MgbCheDF">
+  <div class="ct" data-page-node-id="KimKNgFbRZxTrqqZKM5D3a">纠偏：spacedesk 用的是 H.264 吗？</div>
+  <p style="margin:0 0 8px" data-page-node-id="AXOnkYpGAVTxNz9BCxeRiv">大量中文技术博客（其中相当一部分是 AI 生成内容）声称 spacedesk 使用 H.264、调用 NVENC / Quick Sync 硬件编码，甚至给出 x264 参数表。这些内容<b data-page-node-id="alM5KOKVd5sEp3DJF28QEZ">在官方文档、官方 SDK 说明与官方论坛答复中都找不到任何依据</b>，且与官方给出的可调参数互相矛盾。</p>
+</div>
+
+<h3 data-page-node-id="1DFGikViHHR4Gd74UAEWvZ">官方文档实际披露的可调参数</h3>
+<table data-page-node-id="4bs0zVKFtG3FgzYl8x69NK">
+  <thead data-page-node-id="ueumJTRAMST860klVxeDmk"><tr data-page-node-id="VvsEl2uaJ7e1Dq0RtmIBIH"><th data-page-node-id="rsiwluNWsRqtC97Ws0JpCq">参数</th><th data-page-node-id="mgyQFCyv9sFgHo9z45LVFA">官方取值</th><th data-page-node-id="45y9mlFeHPloMyBXyh7iJ3">说明</th></tr></thead>
+  <tbody data-page-node-id="fnroR5R35q9G717z8IkosL">
+    <tr data-page-node-id="aa7qeypX9f0hbRWOuSaziu"><td data-page-node-id="SXAB0ZEkU1zJFFllcaIyop">压缩性质</td><td data-page-node-id="GeK21e5FdT2ME4JFZw5kuc">有损图像压缩（lossy）</td><td data-page-node-id="MYvNMZSDAo78FW52H3vNW8">官方明示会降低画质与色深</td></tr>
+    <tr data-page-node-id="iJrGJPzXQKN9bvjhcSLqFj"><td data-page-node-id="9bScgDs4tblfS3TBl8O3V9">色度子采样</td><td data-page-node-id="4DYdNgNYnOTJAluvXJ4Ntg">YUV 4:4:4 / 4:2:2 / 4:2:0</td><td data-page-node-id="8G4pDL3zkLct7MrzqvEFPj">4:4:4 不丢色彩信息（24bit）；4:2:2 减 1/3（16bit）；<b data-page-node-id="15oS8MuybkTsMBfsoQnb1X">4:2:0 为默认</b>（12bit，性能最佳）</td></tr>
+    <tr data-page-node-id="TN75xuIVU07b1sER7h1rkG"><td data-page-node-id="SyknzauXAyLy2ycWlv4oVY">压缩质量滑块</td><td data-page-node-id="hsbwDgkr8ABSRboOAkRzzJ">0 ~ 100，默认 70</td><td data-page-node-id="lRDTY9DpYWfSBEwjMrKHB1">100 = 不压缩，0 = 最大压缩</td></tr>
+    <tr data-page-node-id="ILTFUxPcyWhJwcT0gYEFsB"><td data-page-node-id="3cDp1wGXioWW7CcRvUy01w">关闭压缩</td><td data-page-node-id="8iV6bltWrOqruQobfY5avh">可用</td><td data-page-node-id="tbpsU47DbTLjHcB8G8s63z">Windows Viewer 可设 OFF，直接走 <b data-page-node-id="OGd7f1nAsXpB8qqTTpvOtx">RGBA 32 位</b></td></tr>
+    <tr data-page-node-id="k07KaEgaSH9g7cxSecwazu"><td data-page-node-id="Pc0Dy8rT4Qcx0O8AwnMhcU">帧率</td><td data-page-node-id="DG4LqYTHnUzTuKO8GLrQft">Viewer 端可设</td><td data-page-node-id="EEF0cqLGakTZEXkrB0gLwJ">Windows / Android / iOS 均提供设置</td></tr>
+    <tr data-page-node-id="Sj0RD8aeURLHtQZslOqTwq"><td data-page-node-id="zGFLANrzNG9OS6vfQ2gjGp">分辨率上限</td><td data-page-node-id="jzffNGcDvENTm7Rrt7v5P2">Windows/HTML5 ≤ 4096×2160</td><td data-page-node-id="8zKOOXRulsotDBtpkvPopt">iOS / Android 自定义分辨率不得超过设备原生分辨率</td></tr>
+  </tbody>
+</table>
+
+<h3 data-page-node-id="7leJBFAduzNGlCTir5bG7S">为什么这组参数只能是帧内压缩</h3>
+<ul data-page-node-id="NKAtKxizErFObpIDBAooUA">
+  <li data-page-node-id="dbGswBr7j3gwROaq1AK5vB"><b data-page-node-id="K7yXqbYhibxMZKsespVPty">"能关掉压缩走 RGBA32"是决定性证据。</b>H.264 的码流结构与 RGBA 位图不是同一回事，不存在"关闭压缩后输出 RGBA"的选项；而帧内编码（JPEG / DCT 类）天然支持"质量=100 即近似无损"或"整体旁路"。</li>
+  <li data-page-node-id="CN6cQGke6iJtW1FiACjWvG"><b data-page-node-id="mWUYNAc9fc2GNfGixSLbwg">色度子采样是画面级参数，不是帧间参数。</b>4:2:0 / 4:2:2 / 4:4:4 是每帧独立采样的选择，H.264 虽也使用 4:2:0，但它不会以"用户可在客户端切换采样格式"的形式暴露。</li>
+  <li data-page-node-id="K6pF55BF5IRfJ2j7H61EBe"><b data-page-node-id="TgKxqxFDBDmuZzA2HVPZp0">带宽口径对不上。</b>官方给出的最低带宽要求约 <b data-page-node-id="8Uy4aFLFZaW7EmdloCxs8B">50 Mbit/s</b>（BETA 期口径）。而 1080p60 场景下 H.264 的典型码率是 5–15 Mbps 量级——若真用 H.264，官方不可能把门槛定在 50 Mbps。</li>
+</ul>
+
+<h3 data-page-node-id="EeLw8AiZ22DdnhcEmfCttV">带宽账：一帧到底有多大</h3>
+<p data-page-node-id="vFQSH6eNCxXu1yqk8J2CvE">以 1920×1080 @60fps 计算各格式的<b data-page-node-id="EQyGNmlAEU3QsN5GrqFm5X">未压缩</b>裸码率（可精确计算）：</p>
+<table data-page-node-id="VK0jW4SCWNt6A3kAmb4dVa">
+  <thead data-page-node-id="8GGtyftAwoZUYU9BXCAyzp"><tr data-page-node-id="uH2ulcS1kfDL0ReYliiJ4Z"><th data-page-node-id="BDx2Zey41tpDbQe5o0Hopl">像素格式</th><th data-page-node-id="FB4GAQr7ThEDIX2WxtR88V">每像素位数</th><th data-page-node-id="IiiWcEQ3SqWz6K1UzI0SR6">单帧数据量</th><th data-page-node-id="p2ubSDdBLI11mYhn6f3XOY">60fps 裸码率</th><th data-page-node-id="QxnnFLAKh0CtJodtIAhul9">备注</th></tr></thead>
+  <tbody data-page-node-id="na6oDp1SDBbFt1OGZqzHm7">
+    <tr data-page-node-id="sadxMfAEBtlKdNjA6JBEqS"><td data-page-node-id="XG4cTsV01Dr7o6CkvfaYNA">RGBA / RGB32</td><td data-page-node-id="PdYtgB1v9zP28XYaBsHBgk">32 bit</td><td data-page-node-id="1KoqAcB7gGvP3W0wvJhVOd">≈8.29 MB</td><td data-page-node-id="2gvCvwGyTkPr2peraQEQCj"><b data-page-node-id="sHQGGNxNI8nAUKYUnfg8We">≈3982 Mbps</b></td><td data-page-node-id="2Yc9FwdkrMD5jAdQtkNDxh">关闭压缩时的传输形态</td></tr>
+    <tr data-page-node-id="wrU8MZtPl0au8ucfDNr2YP"><td data-page-node-id="0WoRTs0jNWQVGNEwZG1ETg">RGB24 / YUV 4:4:4</td><td data-page-node-id="vUbnai9iYfTCBlXslW9Xis">24 bit</td><td data-page-node-id="41ta1xESbQkERO5tHREFIw">≈6.22 MB</td><td data-page-node-id="yCuOVg1HU0MebjF4eFZDN5"><b data-page-node-id="yRqVWtGmGOWXZ1M1cn4LJ6">≈2986 Mbps</b></td><td data-page-node-id="Pq2Iv8NieHYe32qSg7bzUt">4:4:4 只是不减少色彩信息，不省带宽</td></tr>
+    <tr data-page-node-id="6bVh8LYCheF4ZClNbJsDdw"><td data-page-node-id="abSclj4tP6FQiFegCuslkh">YUV 4:2:2</td><td data-page-node-id="cBpbs5LNa7GLZiHWoyz0Sz">16 bit</td><td data-page-node-id="LUc5mh60jWbbXDLqkQDsV7">≈4.15 MB</td><td data-page-node-id="j3BqlsBHP31R2QKUSblMrB"><b data-page-node-id="PwFK6vM9JNkBoNATIrLCDS">≈1991 Mbps</b></td><td data-page-node-id="njEmiOvdMgMLgrVL8efcEn">色彩信息减 1/3</td></tr>
+    <tr data-page-node-id="2Z6v3REEGYbHhan0iNG4o4"><td data-page-node-id="kGDxst2njQMF047eRlvo1T">YUV 4:2:0</td><td data-page-node-id="8nFaue3F8KfBpivUTjCSDw">12 bit</td><td data-page-node-id="yTNalvTIlbGEz6ucS73FMe">≈3.11 MB</td><td data-page-node-id="ANfZshmoRvKAqXRsycNVrk"><b data-page-node-id="zEPrYLr0YqAYGA0ZiIL43z">≈1493 Mbps</b></td><td data-page-node-id="V1aZRobDU2BjyXv24zny3v">默认设置</td></tr>
+    <tr data-page-node-id="Lp4ySSvraBXBkFuqUJnVu6"><td data-page-node-id="zYCpQV2etWCR9dNK7TQdW1">+ 有损帧内压缩</td><td data-page-node-id="eLaM4ih5XAfTlq3wlkphMQ">—</td><td data-page-node-id="MgRGTw4A810fzGab8wU7D7">—</td><td data-page-node-id="2Lf6r9zqraa8D20tKXGXSj">官方要求最低 <b data-page-node-id="b57oHeYWgVisGJHc46J6Ap">≈50 Mbps</b></td><td data-page-node-id="BILngFFHzaAA2iAB50T1Kl">压缩比量级 ~30:1，与 JPEG 高质量区间吻合</td></tr>
+  </tbody>
+</table>
+
+<div class="callout warn" data-page-node-id="OFXUSISIxmlKgE4DWC7AYB">
+  <div class="ct" data-page-node-id="dga81NY1SzHGOALfEUK7V2">口径说明</div>
+  <p style="margin:0" data-page-node-id="GLdVwo9qkfjSQXJqYPdhMg">上表前四行是可精确计算的理论值；最后一行"官方最低带宽 ≈50 Mbit/s"来自官方文档的网络要求章节，是<b data-page-node-id="dy0h8aEHWQacZyjTAlphea">建议下限而非实测均值</b>——实际码率随分辨率、帧率、质量滑块与画面动态程度浮动。此处不做更细的数值断言，因为官方未公开具体编码算法与默认码率曲线。</p>
+</div>
+
+<h2 data-page-node-id="fAAE9YkuxiwrXvKSU8JRaV">5. 第四段：网络传输</h2>
+
+<h3 data-page-node-id="iaMcgGw0UWXhUw2GYwWqEk">端口与发现</h3>
+<table data-page-node-id="CefBuAt6NEsuGGqZMg9dwL">
+  <thead data-page-node-id="ZMRVsbMWHS2EABdfclhBlz"><tr data-page-node-id="npZqvAr6sxHIKzzNAigf1A"><th data-page-node-id="zGswgfRGFeFJypfVZCEmOa">项目</th><th data-page-node-id="JTy4FPMgGExAbIT24RhmJo">值</th><th data-page-node-id="3kn9D5KZWaCHm6PhJMJuvF">依据</th></tr></thead>
+  <tbody data-page-node-id="Qke6mPw2PslnQuMdoLcDTX">
+    <tr data-page-node-id="vQmLIeLi2TEqFJUMYkUPRL"><td data-page-node-id="dNPURgTAk3ouOCyWeCgR29">主端口</td><td data-page-node-id="E6oV2KcQDumM4Wh1DwRAvn"><code data-page-node-id="D2ja4hCHDf0XhGCaoq4f2u">TCP 28252</code></td><td data-page-node-id="e7RHbthtEW0EMcNU3obSsV">官方手册防火墙章节明确写出</td></tr>
+    <tr data-page-node-id="S1uEn3fLyk8lR0cbdwmzV1"><td data-page-node-id="f05VNzZa9YYBvoeaBMYYPk">同号 UDP</td><td data-page-node-id="0CrTp5bW5Xgn3phjbh3nfe"><code data-page-node-id="0pXiTNe9vBOFLJqWL77bSO">UDP 28252</code></td><td data-page-node-id="nYHJmASEOD4ZB3iDeDjPEu">官方论坛答复第三方防火墙配置时同时列出 TCP/UDP 28252</td></tr>
+    <tr data-page-node-id="HRB7DboDUDtgRF1QpcsBLr"><td data-page-node-id="TxXtBQkQDphbPiDnWYNsws">需放行的程序</td><td data-page-node-id="SbNiIsEQgRMvbpCHMhrXZE"><code data-page-node-id="o7ul54AIEh1fECBhZz9IYT">C:\Windows\System32\spacedeskService.exe</code></td><td data-page-node-id="BFs9qXfdx71BCTXTXlh5ga">官方手册；也可改为放行端口</td></tr>
+    <tr data-page-node-id="3TnteFoMHYx9kcxGAzZQu4"><td data-page-node-id="UWrh0sgueqJF4WKiWaAKML">发现方式</td><td data-page-node-id="2bswwW9iRYiCEJqdSCax2M">局域网内自动发现 + 手动输入 IPv4</td><td data-page-node-id="6MuhArAcLkMGLc8oRBPjrB">跨网段无法自动发现，需手动输 IP</td></tr>
+  </tbody>
+</table>
+
+<div class="callout warn" data-page-node-id="3fCm6Ix24Dkwe9egGF4bY5">
+  <div class="ct" data-page-node-id="Qg20OA10LMxXbqeWQ1AsN0">关于端口号的谣言</div>
+  <p style="margin:0" data-page-node-id="YflkKpqHjTT8o6uBBBEsBW">网络上流传的 <code data-page-node-id="WBoCptzHuf9JmDjFTbFPGE">31952/31953</code>、<code data-page-node-id="atna4VujpgntBYnFjAPDhi">60300</code>、<code data-page-node-id="IF8B4ZIsznevDJAKruWAOT">21988</code>、<code data-page-node-id="CXXnItIgYP3aOwCtGsbSEu">6501–6510</code>、<code data-page-node-id="uPpBZFTJP48tarhobhMjjC">5701</code> 等端口号，均无官方来源，且互相矛盾（同一篇文章里既称"UDP 广播 31952"又称"HTML5 访问 60300"）。以官方口径 <b data-page-node-id="z12GJDzNrF1ibV3V0z6okH">28252</b> 为准；排查连通性问题时，放行 <code data-page-node-id="kWjIbis1MieLhJg8GpKcSB">spacedeskService.exe</code> 比死记端口更可靠。</p>
+</div>
+
+<h3 data-page-node-id="Fzd2YI6o73IQRrGEF1WIXL">支持的物理链路</h3>
+<table data-page-node-id="8VoTzBNim1HpiJwKLBuquH">
+  <thead data-page-node-id="18BBuntm0tx1gSD5LZGNHZ"><tr data-page-node-id="bEWenGauBu8Mc2m9S9hEuV"><th data-page-node-id="2ASz9i0Do3XigvE0emvvq8">连接方式</th><th data-page-node-id="ZGwWkzKhiVfBuSBBTBZAEl">实现要点</th><th data-page-node-id="OmuMlf3oB6JnKPHTXrbx4C">延迟量级（社区实测口径）</th></tr></thead>
+  <tbody data-page-node-id="fWxYdLBmBNFm51VsvBhuiQ">
+    <tr data-page-node-id="eKj7kDm9YLdg0EtCraoGPp"><td data-page-node-id="5gliwOsGq9VnWAeqLEWCD5">以太网直连 / 经交换机</td><td data-page-node-id="myoeDa9CvBoEAkrOrjscnY">两台设备接同一交换机或交叉网线</td><td data-page-node-id="FHCf9NmRJJXgjNvUECuvEV">最优，最稳定</td></tr>
+    <tr data-page-node-id="5pe4NkKq75UOFDTNVCcvp8"><td data-page-node-id="QNipy0jU1GDRnxLQ0SpXVB">Wi-Fi（同一 AP）</td><td data-page-node-id="IqCCUUUPLO3sYaRKSnMo28">需关闭 AP 隔离 / 客户端隔离；建议 5GHz</td><td data-page-node-id="w1xefAMyYRynrSvE0x8veR">受信道拥塞与丢包影响最大</td></tr>
+    <tr data-page-node-id="jGFEjwg7sw0xtVuozrHkJT"><td data-page-node-id="XJHil1kS1SFzX71bqzEOvS">USB 网络共享 / 网络共享</td><td data-page-node-id="ztMbsg4x5H5GdiAYxdLKTl">Android：USB tethering；iOS：个人热点选"仅 USB"</td><td data-page-node-id="3ZwWbFgjcD5AZPI1HqQWRy">接近 WiFi Direct 水平，绕开路由器</td></tr>
+    <tr data-page-node-id="TW2pVHJm33LKtNRhAQOz4p"><td data-page-node-id="4L3TEqnM6OaAowDUjARZbU">Wi-Fi Direct / 移动热点</td><td data-page-node-id="WCPyRWhLGm02mQQEkyKMEQ">主机开移动热点，客户端连该 AP（IP 取自 Microsoft Wi-Fi Direct Virtual Adapter）</td><td data-page-node-id="OXvaIxvergzGHKlt0CfThT">绕开路由器，显著优于普通 Wi-Fi</td></tr>
+    <tr data-page-node-id="jPX6xgT3eX2CjVGHpelHQq"><td data-page-node-id="xNgkaP3zAyZrsjlO6GEw5w">USB 线缆直连</td><td data-page-node-id="Ep4A31SsWrBPjaCqoTpm1V">驱动控制台的 Communication Interfaces 中可检测；依赖 <code data-page-node-id="faPSXicrPecLSLBFEvBTth">spacedeskSrvLibConnectorUsb.dll</code></td><td data-page-node-id="fYJZ72dr2m4fBGw2c8ZeOu">受平台支持限制（iOS 侧并非全版本可用）</td></tr>
+  </tbody>
+</table>
+
+<h3 data-page-node-id="X6SNm8lJAmqZJFc1I9oE5b">安全性：明文传输</h3>
+<div class="callout bad" data-page-node-id="5Crp0RMAxmrGb1HxVcP4iL">
+  <div class="ct" data-page-node-id="eN8gGI62esINRqyRVnZJIy">官方明确声明：客户端与服务端之间不加密</div>
+  <p style="margin:0" data-page-node-id="suqZfwUvq3lRNIBJ6UBaio">官方文档原文即"network protocol ... No encryption transmitting data between client and server. Therefore all information transmitted is potentially available to everybody in the network."这意味着同一局域网内的任何人都可能获取你副屏上的画面内容与回传的输入事件。<b data-page-node-id="lhTi2mBNmzs3RkddsS1WE0">在公共 Wi-Fi、办公网、酒店网络等不可信环境中使用时，应视为屏幕内容公开。</b>如需加密，只能依赖网络层手段（VPN / WPA3 / 独立隔离链路）。</p>
+</div>
+
+<h2 data-page-node-id="nZHavPrTVtBSRYegryZOmP">6. 第五段：客户端解码与渲染</h2>
+<table data-page-node-id="r2MHQsZzyoeBmsBpwt81iE">
+  <thead data-page-node-id="gadWBlRfEdJPqgdsubifGE"><tr data-page-node-id="60vAcE36dbZJjWoku6x4jN"><th data-page-node-id="uaEEzdjq6tmskrvR8ml7qn">客户端</th><th data-page-node-id="MRRIw5UjgZa7KInQVBHyua">系统要求</th><th data-page-node-id="eRUQ2GLvj0FzngQNwrIONm">要点</th></tr></thead>
+  <tbody data-page-node-id="GrcsGzWQ5B7w7b9DbDPCPg">
+    <tr data-page-node-id="8wHca2qqmnAVD3Z71bZz8y"><td data-page-node-id="KuzbCnZ0VCYv69K45mIHfW">Android VIEWER</td><td data-page-node-id="Wy8sktqoTMZagBIkdGc3jR">Android &gt; 4.1</td><td data-page-node-id="qk3ndmKr3pxQX5CWal6NC4">应用商店安装；触控支持绝对/相对模式；自定义分辨率不超过原生分辨率</td></tr>
+    <tr data-page-node-id="EgOPUPcDHEG5WmDXhL9EZu"><td data-page-node-id="GMJJJxHfwhNg9GreG2nK0E">iOS VIEWER</td><td data-page-node-id="b6vNe6RB5fYHM3l6ChB3hA">iOS &gt; 9.3</td><td data-page-node-id="wIxMEGyvSl9R6e1MihWJEP">同上；分辨率同受限；USB 线缆直连在部分版本不受支持</td></tr>
+    <tr data-page-node-id="saK3ulQmBGmpKoaHiJGLhy"><td data-page-node-id="gXzZRCZlt5N7aEPJMbWOuK">Windows VIEWER</td><td data-page-node-id="WLbnhVWzJoHrc02NY91AhP">Win 7 / 8.1 / 10，DirectX 10 以上</td><td data-page-node-id="i1FmLeApfbOGXn1C5ioSFE">支持压缩 OFF（RGBA32）；仅 DirectX 9 的显卡刷新明显慢</td></tr>
+    <tr data-page-node-id="UZeqLhw0Ncwgqg3umxjSIm"><td data-page-node-id="bwp9apysqdKU6g24RNsGwG">HTML5 VIEWER</td><td data-page-node-id="ujIRHIAOv8jk9SgPLANY5t">任何带 HTML5 浏览器的系统</td><td data-page-node-id="b6Wbhfu6CqKKKnQDA9A8B7">零安装；需支持 Websocket；<b data-page-node-id="cvFyrmKpngcXCwqA2FXB51">仅支持鼠标与触控，无键盘控制</b>；最高 4096×2160；官方明确不支持 Firefox 与 Edge</td></tr>
+  </tbody>
+</table>
+
+<div class="grid" data-page-node-id="JYpwjQ9t9C6JNEYkDmexL7">
+  <div class="metric" data-page-node-id="OBc02ZfNTY7BhQdlrLHKAM"><div class="k" data-page-node-id="PdmwU8ohNwjPeK7RCUq0It">并发 Viewer 上限</div><div class="v" data-page-node-id="61mNePN5482OA0WBjjXfre">16 个</div><div class="n" data-page-node-id="wD8Fa0TGs6OpQa21QW2NF8">Android / iOS / Windows 任意组合</div></div>
+  <div class="metric" data-page-node-id="afFGbyzlEOdQfYdGAwdAg3"><div class="k" data-page-node-id="lpcNdnxHQHhcNMfFW6BshN">额外 HTML5 Viewer</div><div class="v" data-page-node-id="bIGkk9nIFcW3FZUTSAZ2FT">1 个</div><div class="n" data-page-node-id="F6BTqKwt3XFmbocB7kNdPS">单独计数，不受 16 限制</div></div>
+  <div class="metric" data-page-node-id="B0BAGPXd4z5bZ7wdMfAtdd"><div class="k" data-page-node-id="yCokvb505QGU0d8mowQqsO">每 Viewer 上限</div><div class="v" data-page-node-id="VzLmBcYafQnTFNsHdBJkep">1 台主机</div><div class="n" data-page-node-id="scpMAxIL50Fava5ghk8hnY">客户端不可同时连多主机</div></div>
+</div>
+
+<h2 data-page-node-id="LHw0RvNFdFUiJizvXztPhB">7. 反向链路：输入回传与虚拟 HID</h2>
+<p data-page-node-id="FeLrEccWwfZgIPkl2O1qyH">副屏上的一次点击要变成主机的鼠标事件，走的是与视频流完全相反的方向：</p>
+
+<div class="flow" data-page-node-id="SqzboDNisQRd6Ko84YAiBI">
+  <div class="fbox fb-purple" data-page-node-id="R5yEtDOgm35uE7S3F08JJX">客户端捕获输入<small data-page-node-id="kHVrOoI96FrAQAOuevIS32">触摸 / 手写笔 / 虚拟键鼠</small></div>
+  <div class="arw" data-page-node-id="vEKgmsWFCCOy8Q9DxbOEIv">→</div>
+  <div class="fbox fb-teal" data-page-node-id="4Diha1MfHAlQNv26xJF2oY">经 28252 回传<small data-page-node-id="vaWtNyvA0ph7pvoqxbaZ01">坐标与事件编码</small></div>
+  <div class="arw" data-page-node-id="2b7JTQRXSJyr08m7nKzJnc">→</div>
+  <div class="fbox fb-blue" data-page-node-id="9E7rYQmZoH394dDVcGclMl">spacedeskService<small data-page-node-id="wZJsZvxTEpqs5F5KbGvNxU">坐标映射与坐标变换</small></div>
+  <div class="arw" data-page-node-id="LIH9HXj9M1KePE8BF9Q3ru">→</div>
+  <div class="fbox fb-gray" data-page-node-id="t9UAsJd8209G02KmPlyOCj">虚拟 HID 注入<small data-page-node-id="EpRmUudfcOg0eOFX3f8TzG">当作真实硬件设备</small></div>
+</div>
+
+<p data-page-node-id="frrwkLJFNTkmKDsQwdES4n">关键点：注入不是"模拟鼠标 API 调用"，而是通过<b data-page-node-id="cnclDx3GWQ6sXCYfjCp5dt">虚拟 HID 设备</b>把事件喂给 Windows 输入栈（<code data-page-node-id="Zk181yFdjF8poL8SPFc1MU">spacedeskDriverHid.dll</code> + <code data-page-node-id="dLP86y4DyCmmX9CCD9o8iA">spacedeskKtmInputMouse.sys</code> / <code data-page-node-id="z2TPtGHoGx1d40hmlyyqyC">spacedeskKtmInputKeybd.sys</code>）。系统把它当作一块真实的键鼠硬件，因此所有应用（含受保护的游戏、需要原始输入的绘图软件）都能正常识别——这也是 spacedesk 能自称"软件 KVM"的技术基础。</p>
+
+<h4 data-page-node-id="BcSOVSYV6jafseLT47DHLp">坐标映射的两种模式</h4>
+<ul data-page-node-id="R2ZZUEvIJVN5Vme7BJUReb">
+  <li data-page-node-id="uh9HKECra5U1SvvlBj7htH"><b data-page-node-id="FCoXD9Sl26YtU2byF6YaKV">绝对模式（absolute）：</b>触摸点直接映射为屏幕绝对坐标，等同于数位板/触摸屏行为。</li>
+  <li data-page-node-id="RJ40SyEx4XX1haLTyKFChk"><b data-page-node-id="GCZRFdIiRtVKIJZigK3qoI">相对模式（relative）：</b>触摸滑动手势映射为指针位移，等同触控板行为。适合小屏手机操控大屏桌面。</li>
+</ul>
+
+<h2 data-page-node-id="0J88pbFat20rSMrqlX9dTe">8. 端到端时延预算</h2>
+<p data-page-node-id="YuHiZQ7d3K5CNXYwAw3wGI"><span class="tag t-doubt" data-page-node-id="utVXlDG64AWOSBosyRB7sI">估算</span>官方未公布时延分解数据，下表为按各环节机理给出的量级估算，用于定位瓶颈，不作为官方指标。</p>
+
+<table data-page-node-id="wusULzCE8eSb6ip8u1EPNJ">
+  <thead data-page-node-id="Jca0PPMY1UJBeaujudGzN6"><tr data-page-node-id="IF3tjjvTVxwsyYrsu52GuJ"><th data-page-node-id="HK9EnIgnkZQNyDqnJGT99Y">环节</th><th data-page-node-id="z1Ur8zlBSKDnPA6hXIeeWt">典型量级</th><th data-page-node-id="y7ziJUj7LKKmAZKZdrKJDV">决定因素</th><th data-page-node-id="XFZb1DKGKyVSkGxWqSfORr">优化方向</th></tr></thead>
+  <tbody data-page-node-id="b1AzFbI2sK5aTN0hidYnpo">
+    <tr data-page-node-id="A223sIDUc9Kf8UEGW7CRIH"><td data-page-node-id="OuAogeLRJVMQu0mhKRyAcJ">桌面合成与帧交付</td><td data-page-node-id="e8OuIlqvb8PjCrfIzYoPoG">≥1 个显示节拍（60Hz ≈ 16.7ms）</td><td data-page-node-id="lV9U9qjEGD1J9Y6tpUXFvy">DWM 合成节拍、虚拟屏刷新率</td><td data-page-node-id="SfukFO7MqKtwi6Do6biHCB">降低副屏分辨率/刷新率</td></tr>
+    <tr data-page-node-id="EVEi1ocZ7R2zjpTpE7uefg"><td data-page-node-id="xl9xsn2YAYN2oSFJmtIAuv">色彩转换与抓帧</td><td data-page-node-id="PtFTXjmwbfxtZeQKf8bCzv">1 ~ 5 ms</td><td data-page-node-id="7ogiZYDtpTyxsCuHw4MKlg">用户态数据搬运、子采样格式</td><td data-page-node-id="8Jdi4w51fyqEHWoXCHF3Cq">选 4:2:0</td></tr>
+    <tr data-page-node-id="yC5IQ3YlqNr3Ok6Tpfv5ZB"><td data-page-node-id="YBkSmtAq83KrxpXZJA5LCV">帧内压缩</td><td data-page-node-id="UCAjEYFqWZMSLsxAmHXABz">5 ~ 15 ms</td><td data-page-node-id="0qR7e20UcLIAtnJRWlQSQm">分辨率 × 帧率 × 质量滑块；CPU 单核性能</td><td data-page-node-id="8qSor9FFmsrkLVpSmJ4QYp">下调质量滑块（70 → 40~50）</td></tr>
+    <tr data-page-node-id="rvdC8R8SQMXiXpOJ4yOFGa"><td data-page-node-id="LAyljEWVCGr3TfxfhiXS1x">网络传输</td><td data-page-node-id="TYTW0eivBaknF74NQGPleX">1 ~ 3 ms（千兆有线）<br data-page-node-id="3vSfmGGA8e2zUmELYqVGnP">5 ~ 20 ms（Wi-Fi 5/6）</td><td data-page-node-id="d1WUG9k2sD0jWhpbFx5yK5">链路介质、拥塞、丢包与重传</td><td data-page-node-id="tCEKDV4CTqbUBBPGbL7MAv">有线 &gt; Wi-Fi Direct &gt; USB 共享 &gt; 普通 Wi-Fi</td></tr>
+    <tr data-page-node-id="avFAuTKINFk8NiMqntnZeV"><td data-page-node-id="T18VPw85MDlJH3110QVZA4">客户端解码</td><td data-page-node-id="ZKnBhIe4FTawI46KAaklFd">3 ~ 10 ms</td><td data-page-node-id="413XVHL6A0rHis1qxgJfLv">是否硬件解码；设备 SoC 能力</td><td data-page-node-id="CXR8w8gltaQpppQA0RFslH">换用支持硬解的较新设备</td></tr>
+    <tr data-page-node-id="ACy0pi0eESpCooaGkyvdys"><td data-page-node-id="27uMkryRHMcBjbTbBhI0Oz">渲染与显示</td><td data-page-node-id="7jjBO4HtNEHabI2mSrfvP3">≥1 个显示节拍</td><td data-page-node-id="CoO08F9FJD9T2dLIPSGBx2">客户端屏幕刷新率与 VSync</td><td data-page-node-id="yofVZg20eX3uPVZuOQEF2G">关闭客户端省电模式</td></tr>
+    <tr data-page-node-id="lVkiipOzSDdg7eTA85UTmT"><td data-page-node-id="3DaZxwYxBq8Ri2zyWKwoWZ"><b data-page-node-id="IaKnnhWzKx6z6UvPfXyX0i">合计（理想）</b></td><td data-page-node-id="Kev9fjhQzi6Ys0ap0Sg72h"><b data-page-node-id="t8BQg3yNhuS1kqi2O4fKMR">约 40 ~ 80 ms</b></td><td data-page-node-id="gaakGEjx3vaBYB7gFUPQ1M">有线直连 + 高画质</td><td data-page-node-id="fybhLb9c9CWgBA1b3xkIin">—</td></tr>
+    <tr data-page-node-id="fpVpWubWvjoy6HyOepSjMI"><td data-page-node-id="Cbv0KliMIHIsgaxVUWgFWz"><b data-page-node-id="8kzlAsqtFgpu9rhznMzJTX">合计（普通 Wi-Fi）</b></td><td data-page-node-id="5sLfLd8r5nVHIFAGIR1sV8"><b data-page-node-id="ck86vA1s6iuA3FKI5w4lAF">约 80 ~ 200 ms</b></td><td data-page-node-id="XwkjjF0RCPJcpUDtOfbnBn">无线链路为主要瓶颈</td><td data-page-node-id="owLdWyfQ8dI2tWI7PXHIam">改有线或 Wi-Fi Direct</td></tr>
+  </tbody>
+</table>
+
+<p data-page-node-id="PObpUVVMsqc4uToPUEW3GU"><b data-page-node-id="y4CpbnDU4MFWIMm6Z8RObo">两点结构性结论：</b>其一，即使其它环节全部归零，<b data-page-node-id="2lOBgUS4wiMjv0alH52vbj">两端各一个合成节拍就锁死了约 33ms 的下限</b>，所以它不可能达到本地显示器的响应水平；其二，无线场景下<b data-page-node-id="iap0jmRgH7wWAiFv9WtsTh">链路质量而非编码能力才是主导变量</b>——这解释了为什么"换更好的路由器"往往比"调编码参数"有效得多。</p>
+
+<h2 data-page-node-id="jhO8Fm1aNelC08oTRqyMQw">9. 与同类方案横向对比</h2>
+<table data-page-node-id="eiDCknrkq8pW9MSCWTdHve">
+  <thead data-page-node-id="gCxcSAUL0zQqlC1qIH48dq"><tr data-page-node-id="Rd872lExwzIT8AfnrraMQp"><th data-page-node-id="AyHhjGcOuHazJEHLvp7lUL">方案</th><th data-page-node-id="f8BcY0FbipIljyduL9d6TR">取帧机制</th><th data-page-node-id="yelITjmTJSjxDGQymzRC1p">副屏能否当独立屏用</th><th data-page-node-id="TwZyQkOPbCeVDRTXbsQIKk">传输介质</th><th data-page-node-id="XxHKM9QDud2hPA9RuRLoRW">成本</th></tr></thead>
+  <tbody data-page-node-id="NSPz8C34SQGQkKASZpBonc">
+    <tr data-page-node-id="TMqk9B1RMbhQCXfFWqBg58"><td data-page-node-id="XWxDEaNRknjqoBKdVP1HGh"><b data-page-node-id="IuZQIzyDbJ8RTbJ0AICEND">spacedesk</b></td><td data-page-node-id="yxBA99S1FWYFDB8AMhYgg4">虚拟显示适配器（软件）</td><td data-page-node-id="4RtFfMQuMDtsAj8421GOkf">可以（真扩展屏）</td><td data-page-node-id="a3lthn8wk0sZhsepdj7mg0">LAN / Wi-Fi / USB 共享</td><td data-page-node-id="eAAyKDuKxINIAHpdFmXqcU">个人免费</td></tr>
+    <tr data-page-node-id="uhShjBcZ7D175QONQknhg5"><td data-page-node-id="bHvGsIBS8hYmgN47ILqCAS">DisplayLink</td><td data-page-node-id="lnnr62Mt9DovoYMlLZRpkh">USB 显示驱动（硬件芯片 + 驱动）</td><td data-page-node-id="a2y1foHDMqaVMBKwWLKR2n">可以</td><td data-page-node-id="qKXn6S4DNOGEnKuEZdovtw">USB</td><td data-page-node-id="2d4erFCjPU3BQ4nrFI9wc4">需专用硬件</td></tr>
+    <tr data-page-node-id="atsyhQ6jsPbLZAwssoBJSF"><td data-page-node-id="dbyLT5JTF2A3GLEglcZkBQ">Miracast</td><td data-page-node-id="T9cokUy5UL1w5zpcApJAJx">无线显示标准（Wi-Fi Direct + H.264）</td><td data-page-node-id="ro048Uevnkt2PerYvHHX4l">通常为镜像</td><td data-page-node-id="CXm3SrIi6pYFSIYAnQx2RP">Wi-Fi Direct</td><td data-page-node-id="q8bpsRZ8sTTZcGCdfqItcP">需硬件支持</td></tr>
+    <tr data-page-node-id="A5qJQzp5gF1ogiSRyFvL6v"><td data-page-node-id="DO0t8eGu7vOzWfln4Et5J6">Apple Sidecar</td><td data-page-node-id="dcV3tTlTRTmZtMcpwnkave">系统内置</td><td data-page-node-id="PqwhAdbhnHLt6KIeQ0H1pA">可以</td><td data-page-node-id="qyszdk7yRM8BO3A56JcUBS">无线 / USB</td><td data-page-node-id="49MhEsRqmQi4YtRANuHpAL">限 Apple 生态</td></tr>
+    <tr data-page-node-id="iGFpN0zHyOzhraGYdUoKA4"><td data-page-node-id="hOXlNmySHoZEoCUTPoJ810">RDP / VNC</td><td data-page-node-id="RI2fUo0OTsHSFKxPIrZfqd">指令式 / 抓屏式</td><td data-page-node-id="HofKsRjPvMEpEox5AKGl4L">否（远程会话，非本地副屏）</td><td data-page-node-id="sMYPnEA5SBNBrBLjJ7SdgB">IP 网络</td><td data-page-node-id="PbrZh6RE2GuxTmM12tmd7z">免费或授权</td></tr>
+    <tr data-page-node-id="N15QoGTzFhO2Ws0vZRVdIA"><td data-page-node-id="s85IEjvEmVtGAHAHOeprsq">Deskreen 等浏览器方案</td><td data-page-node-id="SHHgPi3ANkbFg5nHXSv2Oo">抓屏 + WebRTC</td><td data-page-node-id="VrnRb9VMyPp8JbBtYW6vO1">视实现而定</td><td data-page-node-id="LeF08Y6G54lHru9AEVcWba">浏览器</td><td data-page-node-id="5OBfONbx4vHiEKn9rcfODW">免费</td></tr>
+  </tbody>
+</table>
+
+<h2 data-page-node-id="rBuPf6ofwhcSYbzrRHZU5v">10. 工程边界与已知限制</h2>
+<h3 data-page-node-id="A9UR0WY647ZJbAXj6HDH9K">显示栈独占性（最容易踩的坑）</h3>
+<p data-page-node-id="9Z6mKlWPOtwe0mDAmNXcME">官方明确列出与 spacedesk <b data-page-node-id="O3gK31RB9upzhLsTB72uDI">不能共存</b>的同类 hook 式显示驱动产品：</p>
+<p data-page-node-id="6zkYtKeyeKbdiz1cGCnBzJ"><code data-page-node-id="d1WzIAZePFZzNPlk6SwDqy">DisplayLink</code> · <code data-page-node-id="CML6gQfBIHJLIlPYb4LZK8">Duet Display</code> · <code data-page-node-id="GOwwVg8COOVVCVpko2NN0l">Fresco Logic</code> · <code data-page-node-id="RlCMrz5aqNxgioWGaVJr6h">MCT</code> · <code data-page-node-id="u330ukNfXqE2vzRXN9S9hW">Microchip/SMSC</code> · <code data-page-node-id="edvKnZce4oqXj5zk03mY84">OSBase</code>（被 Duet、Fresco Logic 等使用）· <code data-page-node-id="S5JAhcusQ52fkvgyT0CdEk">Splashtop XDisplay / Extended Display HD</code></p>
+<div class="callout warn" data-page-node-id="hBItmsGDbA3lApUwVoYW5I">
+  <div class="ct" data-page-node-id="IQQJg5syrlJONSouX2Lsm1">注意卸载残留</div>
+  <p style="margin:0" data-page-node-id="Wbs3QlAn5FjIaRweEPQr4F">部分使用 OSBase 驱动的产品（如 Duet Display、Fresco Logic）卸载时不会清理干净，残留驱动仍会导致 spacedesk 报"Incompatible Display Hook Driver Detected"。需手工检查并清除 <code data-page-node-id="ZNHuf3lh8olnwARheh1ve0">ddkmd</code> / <code data-page-node-id="keQkjEudAt9vCVhL6WJGK3">ddkmdldr</code> / <code data-page-node-id="hSRFQn3nIySACJzMOOjWYH">ddmgr</code> 等残留项。</p>
+</div>
+
+<h3 data-page-node-id="rWGoFdDbem0UsSNnFwsZXQ">其它已知冲突与限制</h3>
+<table data-page-node-id="z6jWaC0bt4xgNqxfmWqxU4">
+  <thead data-page-node-id="hPeT9qRimQSTF4JqrCuWn1"><tr data-page-node-id="MavJz1PjqTWSPvVHMV3EPv"><th data-page-node-id="3yqdqYmM87Ezfz8FWAgk3q">项目</th><th data-page-node-id="vJ9vEqr53DzaaNV4jCVFVz">现象</th></tr></thead>
+  <tbody data-page-node-id="eKMxn9IRYyykKjrZLnfmjB">
+    <tr data-page-node-id="q6Y44gGP5JEBHAi7saWx2I"><td data-page-node-id="pLr8fI7w22uuiYW8DQjpnI">NVIDIA ShadowPlay（屏幕录制）</td><td data-page-node-id="GGoOKAfGYH7C2E7LBBQJjb">开启时 Viewer 报错 <code data-page-node-id="zs1ZsMuWrxkuTR9mitieBC">1-2-0</code></td></tr>
+    <tr data-page-node-id="fS5FrVqVRefOtRhwgKZWTO"><td data-page-node-id="pRtD9ZIRgaojI1zfSWBeVg">多 GPU（SLI / CrossFire）</td><td data-page-node-id="V0AxAP3Yoi45XdZBp31uCq">官方明确不支持，启用后无法正常工作</td></tr>
+    <tr data-page-node-id="qdeLLzy1gBST4sBam8a2KT"><td data-page-node-id="UEyV5P40j9rOylu66ggPUU">VPN 启用</td><td data-page-node-id="rJ0Jp2XKl7Ly3jOyQA60Mr">阻断自动发现，表现为"Cannot Detect Primary Machine"或错误码 <code data-page-node-id="PF7Wi80dgd81lPcTnzrDBK">1-0</code></td></tr>
+    <tr data-page-node-id="2RDXEbzKuRNm8IynMLoYdd"><td data-page-node-id="5edac2HBHQNnkCdY9GBQzq">AP 隔离 / 客户端隔离</td><td data-page-node-id="r1m7trUSOJBw7EG0N2fVE3">无线场景下阻断设备互访，只能改路由器配置</td></tr>
+    <tr data-page-node-id="nmkGt4dc6Kp4B2fTlD2sWA"><td data-page-node-id="jRaZ3kjctTT2KbbH1QM1hN">虚拟机</td><td data-page-node-id="WDKNIlyBiQDl7CYglDZtLu">官方明确不支持作为主计算机</td></tr>
+    <tr data-page-node-id="aCKgHIqUeoZDRjeLMQsbzb"><td data-page-node-id="ft1F3bhLJypHHNCCn8PVVF">Windows on ARM</td><td data-page-node-id="mLvbgyHsQHjsQZZNjHAaAS">官方论坛答复为不支持</td></tr>
+    <tr data-page-node-id="UBxsWguC3M3LGClpEoL9hD"><td data-page-node-id="NkdjqyzZn8olrADB0UBGYW">跨网段</td><td data-page-node-id="NqwxCuvJLiCsyGSRcNYagx">无法自动发现，需手动输入 IPv4</td></tr>
+    <tr data-page-node-id="hSDhphtAKGDIvImY55V9EN"><td data-page-node-id="lbkSWFcwHvLxObRztVFD0T">vSpatial Remote Desktop Utility</td><td data-page-node-id="vIa1p9ZoHKL13OZUb8ZXGw">目前与 spacedesk 无法共存</td></tr>
+  </tbody>
+</table>
+
+<h3 data-page-node-id="GjvezuCQBFW41iQAxZktOw">安全与隐私</h3>
+<ul data-page-node-id="HaXHkhGAVxyosmLbacm0Yt">
+  <li data-page-node-id="9Q0eGgdFcVSFB9VOCOcPXo"><b data-page-node-id="Bj7vaMI5eie2Ne2uWkDhvT">明文传输：</b>画面与输入事件在局域网内可被嗅探（官方明示）。</li>
+  <li data-page-node-id="HJiHEGtmMSXNA7TN7hSvqy"><b data-page-node-id="GMIjXZsTtnxgb0u53HmiMO">输入注入权限：</b>虚拟 HID 能产生系统级键鼠事件，相当于把主机的完整控制权交给了接入的客户端——在不可信网络下不要保持服务长期开启。</li>
+  <li data-page-node-id="ICDfo2dbaEXjFFijvigei9"><b data-page-node-id="hCdm318iN6wVV4IH07KzuJ">驱动签名：</b>安装需加载显示驱动，企业环境中 Secure Boot / 驱动强制签名 / 组策略可能拦截。</li>
+</ul>
+
+<h2 data-page-node-id="PviEJsqr2exDKwWtg5aBE1">11. 调优建议：按环节映射</h2>
+<table data-page-node-id="nAdflAFIcPFU5MbUIOa7RB">
+  <thead data-page-node-id="xq9gtZ0AJPoojJ4hFV2lSW"><tr data-page-node-id="aupfFeHF1O6sPSOKOms4pa"><th data-page-node-id="iy6zXhMg9kuRFW3l5z9FLa">症状</th><th data-page-node-id="2iaFM38CzfyiY3Z2fOrs2q">瓶颈环节</th><th data-page-node-id="lRopq7q168oakoe9TAbKLf">措施</th></tr></thead>
+  <tbody data-page-node-id="TiiWKeFc7yK1iWvj8a86Al">
+    <tr data-page-node-id="VBNkxSdEeY3AUA1tFTpz6c"><td data-page-node-id="rZRulaYhv38xyBNzpJ5PtL">鼠标拖影、操作跟手差</td><td data-page-node-id="bb5sm85SLiSKdfhCwZb2oE">网络传输 + 压缩</td><td data-page-node-id="TqqfV5K69b6IWAHbwKVXaD">改用有线/直连；把质量滑块从 70 降到 40~50；子采样选 4:2:0</td></tr>
+    <tr data-page-node-id="T5DSU3MjxGMKDBRlHbBSGJ"><td data-page-node-id="Vmrhy7FAOL2VOWyKhKUxbT">画面卡成幻灯片</td><td data-page-node-id="R1BYQT9AuBdfHeWBwd2EMB">链路带宽 / 丢包</td><td data-page-node-id="WBDdCuTgpqvDak6GBGeILL">换 5GHz 或 Wi-Fi Direct；检查 AP 隔离；避免与云同步/视频流抢带宽</td></tr>
+    <tr data-page-node-id="MhSky0F15t0kHUJM1gtNPl"><td data-page-node-id="FonDxDUN63ZQVemtUcYGax">主机 CPU 占用高</td><td data-page-node-id="J2jrqSkJtlABjwaJZzoTxw">帧内压缩</td><td data-page-node-id="QkZR8yTG5XJwSLjbUhwEmm">降低副屏分辨率与帧率；降低质量滑块；避免高质量 4:4:4</td></tr>
+    <tr data-page-node-id="aXVysIqBVnw6JFJyfjcWu0"><td data-page-node-id="j4vqLEVkjM2kEBop0DNXif">色彩发灰、文字边缘有细格</td><td data-page-node-id="DKPMhrQigAlDE9SBdXkyGX">色度子采样 + 有损压缩</td><td data-page-node-id="tXZ8tF7vHmkiDDQv7rooJH">子采样提到 4:2:2/4:4:4；质量滑块接近 100；有线环境可试关闭压缩</td></tr>
+    <tr data-page-node-id="rJHLXgFCr6jBav6ybseX1E"><td data-page-node-id="1gCIiaLLDGfvAdBlkAzEbD">客户端搜不到主机</td><td data-page-node-id="PLYssKnezpge04x0F1ycZn">发现机制</td><td data-page-node-id="Jfps7YQRpwiPVaZMJgrAX9">关闭 VPN；放行 <code data-page-node-id="B7Nc4HKOWiPxoxCdJWfAxF">spacedeskService.exe</code>；改手动输 IP；确认未开 AP 隔离</td></tr>
+    <tr data-page-node-id="cW8osj3WRrQQEwoe29vox5"><td data-page-node-id="0eJosa0q93fsgFYcAkOqjJ">连上但副屏黑屏</td><td data-page-node-id="qhWW6ImtSKnq7AyhU53Kex">显示模式</td><td data-page-node-id="JjqkrnVucr2cxAnKfrqLIs">主机按 Win+P 切到"扩展"</td></tr>
+    <tr data-page-node-id="0dHoU4P2gYbhGk5rTLcul8"><td data-page-node-id="EhYdqctqbh1Z6wG47MG16R">驱动报错、黄叹号</td><td data-page-node-id="AijfRweEeffnG0wMtzoP6j">驱动层</td><td data-page-node-id="dGnAnxarBa07JGbfs6eG2D">检查 <code data-page-node-id="uQtu0zs0TYhX1BeiiYZnzC">System32\drivers\UMDF\spacedeskDisplayUmode1_x.dll</code> 是否存在；设备管理器禁用再启用 spacedesk Graphics Adapter</td></tr>
+  </tbody>
+</table>
+
+<h2 data-page-node-id="LLJ9AvM2hs1EhRDvRqOBRy">12. 事实可信度分级与来源</h2>
+<table data-page-node-id="n255qFlSxnkzlBdPVMbX5v">
+  <thead data-page-node-id="AqrcAq6QtTjBJ4grmhqiGO"><tr data-page-node-id="MgFNYPS8YI9CbtYAHpE5AZ"><th data-page-node-id="qKsIM5xKUFBSvfnJDVLmk7">级别</th><th data-page-node-id="bLV4uJXZO0Tm2BWGR8BHus">含义</th><th data-page-node-id="k2IzreWwwPQZNMhOuOa5Hq">本文中的对应内容</th></tr></thead>
+  <tbody data-page-node-id="HE4gnVSO8p1IFrdEqz60Fk">
+    <tr data-page-node-id="O40oM0jwi2MLQNwh9Fwhm2"><td data-page-node-id="I7IkaCXLnW3tE5RlvQmtVF"><span class="tag t-official" data-page-node-id="mDX5O8Q2YqzF4VORtW03aq">官方</span></td><td data-page-node-id="VcGichPmgukAmW0SjI8F9K">出自 spacedesk 官网/用户手册/SDK 说明/官方论坛答复</td><td data-page-node-id="qLp7WO7EWgKFEneSZr0pMy">驱动模型（IddCx / Filter Hook）、组件文件清单、端口 28252、并发上限 16+1、子采样与质量滑块、无加密声明、不兼容驱动清单、各客户端系统要求</td></tr>
+    <tr data-page-node-id="HgRinXYB3aC9HdZCnhkpbt"><td data-page-node-id="MsyvHyINCv9CNmXhbzf4YG"><span class="tag t-infer" data-page-node-id="vcVxz1n47yTMsQXp389Gwt">推断</span></td><td data-page-node-id="x12rUAmxRyt20kF8ZSC9xU">由官方参数交叉推导</td><td data-page-node-id="J0KLbnMFjWhzkOwzHyTH85">"压缩为帧内（JPEG 类）而非 H.264"；"帧经 IddCx 表面交付、无需截屏 API"</td></tr>
+    <tr data-page-node-id="NZPXYDYkMAJjHvIcz3C9mQ"><td data-page-node-id="msfFB4urkLbSiAC1aXsyPy"><span class="tag t-doubt" data-page-node-id="fKTxZsIr8TTMJ7qirBinZG">估算</span></td><td data-page-node-id="dKMQWGajvm6DoOd1qAdEso">机理推算，非官方数据</td><td data-page-node-id="hO934XcWDYTCU9vFH2PGlJ">第 8 节时延预算、第 4 节带宽表中的压缩后码率区间</td></tr>
+    <tr data-page-node-id="Xio2tPMjS9yHbGrcgyFV5M"><td data-page-node-id="CE7v81Co7Rhe7bcWTp4SP1"><span class="tag t-wrong" data-page-node-id="ra4DHvQUfC43H9cqALXlwr">存疑</span></td><td data-page-node-id="PTQWVUyBg7m92VnTg2eAeW">流传较广但无官方依据，本文不予采信</td><td data-page-node-id="4qwHb1Mer1qgE1R1W510E1">"H.264 / NVENC 硬编 + x264 参数表"、<code data-page-node-id="zcmRsp5MBlWGNnisuwZA20">31952 / 31953 / 60300 / 21988 / 6501–6510 / 5701</code> 等端口号、"自研 SDP 协议"、"WebRTC over WebSocket + WASM 解码"</td></tr>
+  </tbody>
+</table>
+
+<div class="foot" data-page-node-id="Z9qFBltZcJ744bDG6nPi9e">
+  <p data-page-node-id="QH1dLXxT3R9c44wXDZshKW"><b data-page-node-id="KLtY6byB8lGstztMDdrxDC">复核建议：</b>若要进一步确证编码类型，最直接的路径是在 IDA/Ghidra 中静态分析 <code data-page-node-id="wOdx8lAtp2JGhR5wNhaEoZ">spacedeskDisplayUmode1_2.dll</code> 与 <code data-page-node-id="wg21rQgsYzEn64L0KrG4mL">spacedeskService.exe</code> 的导入表（查找 <code data-page-node-id="Kflv43IA6lhfCCcjinlaY5">libjpeg</code> / <code data-page-node-id="uYCEXG1fVwFAYe6OcLtqnM">jpeg_*</code>、<code data-page-node-id="VVdPgP1Hq6fahzJRBG3QtD">mfplat</code>、<code data-page-node-id="XTe7AY8JPaR8bhvrp7CR62">nvEncodeAPI</code>、<code data-page-node-id="WdbRCT714EE6mXlCA81Tlv">mfx*</code> 等符号），或在 1080p 静态桌面下用 Wireshark 统计实际吞吐并与 50 Mbps 口径比对。本文基于公开资料，未做二进制逆向。</p>
+</div>
+
+</div>
+</body>
+</html>

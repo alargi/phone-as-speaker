@@ -1,0 +1,40 @@
+# ---------------------------------------------------------------
+# phone-as-speaker — 行尾与文本属性
+#
+# 仓库里统一存 LF；Windows 专属的批处理与 VBS 在检出时自动转成
+# CRLF，避免 cmd.exe 对 LF-only 批处理的解析差异。
+# ---------------------------------------------------------------
+
+# 默认：Git 自动判定文本/二进制，文本一律按 LF 存储
+* text=auto
+
+# Windows 批处理与脚本：检出时必须 CRLF
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+*.vbs  text eol=crlf
+
+# 源码与文档：统一 LF
+*.py       text eol=lf
+*.html     text eol=lf
+*.css      text eol=lf
+*.js       text eol=lf
+*.md       text eol=lf
+*.txt      text eol=lf
+*.yml      text eol=lf
+*.yaml     text eol=lf
+*.json     text eol=lf
+.gitignore text eol=lf
+
+# 无扩展名的文本文件没有通配符可匹配，单独列出，避免被转成 CRLF
+LICENSE        text eol=lf
+.gitattributes text eol=lf
+
+# 二进制资源不要做任何换行转换
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.svg  text eol=lf
+*.woff binary
+*.woff2 binary

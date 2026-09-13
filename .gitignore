@@ -1,0 +1,66 @@
+# ---------------------------------------------------------------
+# phone-as-speaker — 忽略规则
+# ---------------------------------------------------------------
+
+# ---- 本项目的运行产物 ----
+# 服务启动时写出：进程号与端口（stop.bat 用）、静默模式的日志落点
+.speaker.pid
+speaker.log
+*.log
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ---- 虚拟环境 ----
+# setup.bat 会在这里建本地环境
+.venv/
+venv/
+ENV/
+env/
+.python-version
+
+# ---- 测试与覆盖率 ----
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# ---- 编辑器与 IDE ----
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+
+# ---- 操作系统 ----
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+desktop.ini
+$RECYCLE.BIN/
