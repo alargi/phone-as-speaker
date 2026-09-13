@@ -39,13 +39,13 @@
 
 链路状态、实时码率与帧率曲线、每条连接的 RTT 与抖动、参数调节、运行控制，全在这一个页面。
 
-![主机端控制台](screenshot-console.png)
+![主机端控制台](./docs/screenshot-console.png)
 
 ### 设备端播放页 `/`
 
 扫码或在浏览器里打开地址即用。缓冲档位会按当前链路自动推荐（下图是 ADB 有线链路，60 ms 档）。
 
-<img src="screenshot-player.png" width="420" alt="设备端播放页">
+<img src="./docs/screenshot-player.png" width="420" alt="设备端播放页">
 
 ---
 
