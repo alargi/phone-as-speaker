@@ -94,6 +94,7 @@ STATIC_DIR = APP_DIR / "static"
 # 标准输出追加到日志文件，保证"没有终端"但仍有排查线索。
 PID_FILE = APP_DIR / ".speaker.pid"
 LOG_FILE = APP_DIR / "speaker.log"
+LOG_ROTATE_BYTES = 5 * 1024 * 1024        # 超过就换一代，避免长期运行无限增长
 
 
 def _redirect_output(path: Path) -> None:
@@ -101,8 +102,18 @@ def _redirect_output(path: Path) -> None:
 
     pythonw.exe 启动时 sys.stdout 是 None，此时把输出丢给文件，
     出问题还能打开 speaker.log 看，而不是两眼一抹黑。
+
+    文件只 append 不轮转的话，长期静默运行（开机自启）会一直长下去，
+    所以每次启动前检查一次：超过上限就换成 .1，只留一代。
     """
     try:
+        if path.exists() and path.stat().st_size > LOG_ROTATE_BYTES:
+            backup = path.with_name(path.name + ".1")
+            try:
+                backup.unlink()
+            except OSError:
+                pass
+            path.replace(backup)
         f = open(path, "a", encoding="utf-8", buffering=1)
     except Exception:                                 # noqa: BLE001
         return
@@ -139,6 +150,11 @@ DEFAULT_QUEUE_MAX = 15
 ALLOWED_FRAME_MS = (5, 10, 20, 30, 40, 60, 100)
 ALLOWED_RATES = (0, 48000, 44100, 32000, 24000, 16000, 8000)
 ALLOWED_CHANNELS = (1, 2)
+
+# 客户端每 2 秒回报一次 RTT。只保留「最近一次」时，一次 40ms 的采样就会让控制台
+# 显示成 40ms，而前后几十次都是 3ms——看上去像链路整体变差了。留 8 次（约 16 秒）
+# 并同时给出中位数与最大值，才能区分「一直慢」和「偶尔抖」。
+RTT_HISTORY = 8
 
 LOG_RING: deque[str] = deque(maxlen=300)
 
@@ -421,7 +437,16 @@ class Viewer:
         self.dropped = 0
         self.sent_frames = 0
         self.sent_bytes = 0
-        self.rtt_ms: float | None = None       # 由客户端回报的链路往返时延
+        self.closed = False                    # 发送端已放弃这一路（写失败）
+        # 发送反压：send_bytes 只有在 socket 写缓冲超过高水位、等内核腾位置时才
+        # 会真的挂住。这个耗时是"我们自己的积压"，必须与链路时延分开看——否则
+        # 客户端回报的 RTT 里混着它，看起来就像链路突然慢了十倍。
+        self.send_wait_ms = 0.0
+        self.send_wait_max = 0.0
+        self.rtt_ms: float | None = None       # 由客户端回报的链路往返时延（最近一次）
+        self.rtt_hist: deque[float] = deque(maxlen=RTT_HISTORY)   # 最近若干次采样
+        self.link_ms: float | None = None      # 扣掉服务端发送反压后的链路时延
+        self.link_hist: deque[float] = deque(maxlen=RTT_HISTORY)
         self.jitter_ms: float | None = None    # 客户端回报的 RTT 标准差
         self.buffer_ms: int | None = None      # 客户端当前缓冲档位
         self.ua = ua[:70]
@@ -442,9 +467,39 @@ class Viewer:
     async def writer(self) -> None:
         while True:
             frame = await self.queue.get()
-            await self.ws.send_bytes(frame)
+            if self.ws.closed:
+                self.closed = True
+                return
+            try:
+                t0 = time.perf_counter()
+                await self.ws.send_bytes(frame)
+                self.send_wait_ms = (time.perf_counter() - t0) * 1000.0
+                if self.send_wait_ms > self.send_wait_max:
+                    self.send_wait_max = self.send_wait_ms
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                # 写失败（连接已断、内核缓冲满、对端消失）后如果就这么抛出去，这个
+                # task 会静默死掉：连接仍挂在 clients 里、状态显示在线、队列继续被
+                # 填满然后丢弃，用户侧表现是"连着但没声音"。这里主动关闭连接，让
+                # handle_ws 的读循环自然结束并走正常的断开清理。
+                if not self.closed:
+                    self.closed = True
+                    log(f"[!] 客户端 #{self.id} 发送失败，已关闭这一路：{exc!r}")
+                try:
+                    await self.ws.close()
+                except Exception:
+                    pass
+                return
             self.sent_frames += 1
             self.sent_bytes += len(frame)
+
+    def rtt_summary(self) -> tuple[float | None, float | None, float | None]:
+        """(最近一次, 中位数, 最大值)。偶数个采样时取偏上的那个，够用。"""
+        if not self.rtt_hist:
+            return None, None, None
+        ordered = sorted(self.rtt_hist)
+        return self.rtt_hist[-1], ordered[len(ordered) // 2], ordered[-1]
 
     def snapshot(self) -> dict:
         return {
@@ -453,7 +508,17 @@ class Viewer:
             "since": round(time.time() - self.since, 1),
             "sent_frames": self.sent_frames,
             "dropped": self.dropped,
-            "rtt_ms": round(self.rtt_ms, 1) if self.rtt_ms is not None else None,
+            "queued": self.queue.qsize(),
+            "send_wait_ms": round(self.send_wait_ms, 1),
+            "send_wait_max_ms": round(self.send_wait_max, 1),
+            "rtt_ms": round(self.rtt_hist[-1], 1) if self.rtt_hist else None,
+            "rtt_med_ms": (round(self.rtt_summary()[1], 1)
+                           if self.rtt_hist else None),
+            "rtt_max_ms": (round(self.rtt_summary()[2], 1)
+                           if self.rtt_hist else None),
+            "link_ms": round(self.link_hist[-1], 1) if self.link_hist else None,
+            "link_med_ms": (round(sorted(self.link_hist)[len(self.link_hist) // 2], 1)
+                            if self.link_hist else None),
             "jitter_ms": round(self.jitter_ms, 1) if self.jitter_ms is not None else None,
             "buffer_ms": self.buffer_ms,
         }
@@ -463,8 +528,9 @@ class ServerState:
     def __init__(self, cfg) -> None:
         self.cfg = cfg
         self.clients: dict[int, Viewer] = {}
-        self.frames_out = 0
+        self.frames_out = 0                 # 真正发给客户端的帧（0 客户端时不增长）
         self.bytes_out = 0
+        self.produced_frames = 0            # 采集端产出的帧，与有没有人在听无关
         self.started = time.time()
         self.capture: AudioCapture | None = None
         self.link_kind = "none"
@@ -500,6 +566,14 @@ class SpeakerServer:
         self.state = ServerState(cfg)
         self.loop: asyncio.AbstractEventLoop | None = None
         self.audio_q: asyncio.Queue = asyncio.Queue(maxsize=cfg.queue_max)
+        # audio_q 满时丢的是最旧的一帧：这发生在分发到各客户端之前，既不计入
+        # clients[].dropped，也不影响 frames_out，属于"整条链路上最难发现"的丢帧。
+        # 单独计数，否则它永远是一笔糊涂账。
+        self.dropped_frames = 0
+        # 改参数会重启采集（关设备、开设备）。并发打进来的 N 个请求会各自
+        # 重启一遍，把设备句柄抢成随机状态。锁只做"同一时刻只允许一次变更"，
+        # 不做频率限制——按时间拒绝会误伤正常的连续调整。
+        self._config_lock = asyncio.Lock()
         self.tasks: list[asyncio.Task] = []
 
     # ---- 捕获线程 -> 事件循环 ----
@@ -516,12 +590,13 @@ class SpeakerServer:
         if self.audio_q.full():
             try:
                 self.audio_q.get_nowait()
+                self.dropped_frames += 1
             except asyncio.QueueEmpty:
                 pass
         try:
             self.audio_q.put_nowait(payload)
         except asyncio.QueueFull:
-            pass
+            self.dropped_frames += 1
 
     # ---- 捕获生命周期（可重启） ----
     def _drain_audio_queue(self) -> None:
@@ -543,15 +618,17 @@ class SpeakerServer:
         self.state.capture.start()
         log("[*] 开始采集")
 
-    def stop_capture(self) -> None:
+    async def stop_capture(self) -> None:
         cap = self.state.capture
         if cap:
-            cap.stop()
+            # 采集线程收尾要把 WASAPI 设备关掉，join 最长 3 秒；直接在事件循环里
+            # 等，整台机器的 HTTP 服务（控制台、改参数、健康检查）都会一起卡住。
+            await asyncio.to_thread(cap.stop)
         self.state.capture = None
         log("[*] 已停止采集")
 
-    def restart_capture(self) -> None:
-        self.stop_capture()
+    async def restart_capture(self) -> None:
+        await self.stop_capture()
         self.start_capture()
 
     # ---- HTTP：页面 ----
@@ -575,7 +652,10 @@ class SpeakerServer:
         s = self.state
         cap = s.capture
         elapsed = max(time.time() - s.started, 0.001)
-        rtts = [v.rtt_ms for v in s.clients.values() if v.rtt_ms is not None]
+        rtt_meds = [v.rtt_summary()[1] for v in s.clients.values() if v.rtt_hist]
+        rtt_peaks = [v.rtt_summary()[2] for v in s.clients.values() if v.rtt_hist]
+        rtt_med = round(sorted(rtt_meds)[len(rtt_meds) // 2], 1) if rtt_meds else None
+        rtt_peak = round(max(rtt_peaks), 1) if rtt_peaks else None
         return web.json_response({
             "ok": cap is not None and cap.error is None,
             "device": cap.device_name if cap else None,
@@ -589,7 +669,8 @@ class SpeakerServer:
             "kbps": round(s.bytes_out * 8 / elapsed / 1000.0, 1),
             "link": s.link_kind,
             "best_url": s.best_url,
-            "rtt_ms": round(min(rtts), 1) if rtts else None,
+            "rtt_ms": rtt_med,
+            "rtt_max_ms": rtt_peak,
             "capture_error": cap.error if cap else "not started",
         })
 
@@ -637,8 +718,13 @@ class SpeakerServer:
             },
             "totals": {
                 "frames": s.frames_out,
+                "produced": s.produced_frames,
                 "bytes": s.bytes_out,
-                "kbps": round(s.bytes_out * 8 / elapsed / 1000.0, 1),
+                # 取最近一秒的瞬时值，而不是累计平均：断开客户端之后累计平均只会
+                # 缓慢衰减，看起来像还在发数据。
+                "kbps": s.history[-1]["kbps"] if s.history else 0.0,
+                "fps": s.history[-1]["fps"] if s.history else 0.0,
+                "dropped": self.dropped_frames,
                 "clients": len(s.clients),
             },
             "clients": [v.snapshot() for v in s.clients.values()],
@@ -718,10 +804,16 @@ class SpeakerServer:
                 changed.append(f"设备 «{v or '默认'}»")
 
         if changed:
-            self.state.config_rev += 1
-            log(f"[*] 参数已更新：{'、'.join(changed)}（重启采集生效）")
-            self.restart_capture()
-            await self.broadcast_config()
+            if self._config_lock.locked():
+                return web.json_response(
+                    {"ok": False, "error": "上一次参数变更还在生效中，请稍后再试"},
+                    status=429)
+            async with self._config_lock:
+                self.state.config_rev += 1
+                log(f"[*] 参数已更新（来自 {request.remote}）："
+                    f"{'、'.join(changed)}（重启采集生效）")
+                await self.restart_capture()
+                await self.broadcast_config()
         elif not rejected:
             log("[*] 参数未变化")
 
@@ -739,9 +831,9 @@ class SpeakerServer:
         if action == "start":
             self.start_capture()
         elif action == "stop":
-            self.stop_capture()
+            await self.stop_capture()
         elif action == "restart":
-            self.restart_capture()
+            await self.restart_capture()
         elif action == "clear_log":
             LOG_RING.clear()
             log("[*] 日志已清空")
@@ -775,7 +867,7 @@ class SpeakerServer:
                 await asyncio.to_thread(usblink.teardown, self.cfg.port, log)
         except Exception:                             # noqa: BLE001
             pass
-        self.stop_capture()
+        await self.stop_capture()
         log("[*] 已退出")
         # os._exit 会跳过 main 的 finally，所以要在这里自己清 pid 文件。
         _remove_pidfile()
@@ -856,11 +948,28 @@ class SpeakerServer:
     async def broadcast_config(self) -> None:
         """参数变了以后通知所有客户端重建 AudioBuffer。"""
         msg = self.config_msg()
-        for v in list(self.state.clients.values()):
+        targets = [v for v in list(self.state.clients.values()) if not v.closed]
+        if not targets:
+            return
+        # 串行 await 的话，一个卡住的连接会把其余客户端和整个事件循环一起拖住
+        # （改个参数要等好几秒才有回应）。并发发，并且给每一路设上限，慢的就不
+        # 要了——反正它下一轮重连还会拿到 config。
+        await asyncio.gather(*(self._send_ctrl(v, msg) for v in targets),
+                             return_exceptions=True)
+
+    async def _send_ctrl(self, viewer: "Viewer", msg: str) -> None:
+        """发一条控制消息，超时就放弃这一路；失败不抛给调用者。"""
+        try:
+            await asyncio.wait_for(viewer.ws.send_str(msg), timeout=2.0)
+        except asyncio.TimeoutError:
+            viewer.closed = True
+            log(f"[!] 客户端 #{viewer.id} 控制消息发送超时，已放弃这一路")
             try:
-                await v.ws.send_str(msg)
-            except Exception:                         # noqa: BLE001
+                await viewer.ws.close()
+            except Exception:                     # noqa: BLE001
                 pass
+        except Exception:                         # noqa: BLE001
+            pass
 
     async def handle_ws(self, request: web.Request) -> web.StreamResponse:
         ws = web.WebSocketResponse(heartbeat=30, max_msg_size=1 << 20)
@@ -871,9 +980,13 @@ class SpeakerServer:
         self.state.clients[viewer.id] = viewer
         log(f"[+] 客户端 #{viewer.id} 接入（共 {len(self.state.clients)} 路）  {viewer.ua}")
 
-        writer = asyncio.create_task(viewer.writer())
+        # 先发 config 再启动发送任务：队列里可能已经攒了几帧音频，若 writer 先跑
+        # 起来，首帧会抢在 config 前面到达，客户端只能按默认的 48000/2 去解，听感
+        # 是开头一段音调/速度不对，直到 config 到达才恢复。
+        writer: asyncio.Task | None = None
         try:
             await ws.send_str(self.config_msg())
+            writer = asyncio.create_task(viewer.writer())
 
             async for msg in ws:
                 if msg.type == WSMsgType.ERROR:
@@ -887,13 +1000,29 @@ class SpeakerServer:
 
                 mtype = req.get("type")
                 if mtype == "ping":
-                    # 链路质量探针：原样回带时间戳，客户端据此算 RTT 与抖动
-                    await ws.send_str(json.dumps({"type": "pong", "t": req.get("t")}))
+                    # 链路质量探针：原样回带时间戳，客户端据此算 RTT 与抖动。
+                    # 同时带上服务端此刻的发送反压与排队帧数，客户端才能把
+                    # "链路时延"和"我们自己积压"分开，而不是看到一个假的十倍延迟。
+                    await ws.send_str(json.dumps({
+                        "type": "pong", "t": req.get("t"),
+                        "w": round(viewer.send_wait_ms, 1),
+                        "q": viewer.queue.qsize(),
+                    }))
                 elif mtype == "rtt":
                     try:
-                        viewer.rtt_ms = float(req.get("ms"))
+                        ms = float(req.get("ms"))
                     except (TypeError, ValueError):
-                        pass
+                        ms = None
+                    if ms is not None:
+                        viewer.rtt_ms = ms
+                        viewer.rtt_hist.append(ms)
+                    try:
+                        lm = float(req.get("link_ms"))
+                    except (TypeError, ValueError):
+                        lm = None
+                    if lm is not None:
+                        viewer.link_ms = lm
+                        viewer.link_hist.append(lm)
                     try:
                         viewer.jitter_ms = float(req.get("jitter"))
                     except (TypeError, ValueError):
@@ -905,7 +1034,8 @@ class SpeakerServer:
         except Exception as exc:                      # noqa: BLE001
             print(f"[!] 客户端 #{viewer.id} 处理异常：{type(exc).__name__}: {exc}", flush=True)
         finally:
-            writer.cancel()
+            if writer is not None:
+                writer.cancel()
             self.state.clients.pop(viewer.id, None)
             log(f"[-] 客户端 #{viewer.id} 断开，已发送 {viewer.sent_frames} 帧"
                 f"，丢弃 {viewer.dropped} 帧（剩余 {len(self.state.clients)} 路）")
@@ -917,6 +1047,13 @@ class SpeakerServer:
         while True:
             payload = await self.audio_q.get()
             s = self.state
+            # 采集线程没法知道有没有人在听，帧总是按 100fps 产出来。以前这里不做
+            # 判断、照单全收地累加 frames_out / bytes_out，于是 0 客户端时控制台
+            # 仍然显示 100 fps、1.5 Mbps，看着像在往网络发数据——其实一字节都没
+            # 出去。现在分开记：produced 是产出，frames/bytes 才是真发出去的。
+            s.produced_frames += 1
+            if not s.clients:
+                continue
             s.frames_out += 1
             s.bytes_out += len(payload)
             for viewer in list(s.clients.values()):
@@ -933,11 +1070,19 @@ class SpeakerServer:
             s = self.state
             cap = s.capture
             err = f"  ⚠ {cap.error}" if cap and cap.error else ""
-            rtts = [v.rtt_ms for v in s.clients.values() if v.rtt_ms is not None]
-            rtt = f"  链路RTT {min(rtts):.1f} ms" if rtts else ""
-            log(f"[*] 帧 {s.frames_out:>7}  "
+            meds = [v.rtt_summary()[1] for v in s.clients.values() if v.rtt_hist]
+            peaks = [v.rtt_summary()[2] for v in s.clients.values() if v.rtt_hist]
+            if meds:
+                med = sorted(meds)[len(meds) // 2]
+                # 中位数说"平时多快"，峰值说"抖到什么程度"。只打 min 会把尖峰抹平，
+                # 只打最近一次又会把一次 40ms 的偶然当成常态。
+                rtt = f"  RTT 中位 {med:.1f} / 峰 {max(peaks):.1f} ms"
+            else:
+                rtt = ""
+            drop = f"  丢弃 {self.dropped_frames}" if self.dropped_frames else ""
+            log(f"[*] 帧 {s.frames_out:>7}  产出 {s.produced_frames:>7}  "
                 f"码率 {s.bytes_out * 8 / 1000 / max(time.time() - s.started, 0.001):>7.0f} kbps  "
-                f"客户端 {len(s.clients)}{rtt}{err}")
+                f"客户端 {len(s.clients)}{rtt}{drop}{err}")
 
     # ---- 生命周期 ----
     async def on_startup(self, app: web.Application) -> None:
@@ -952,7 +1097,7 @@ class SpeakerServer:
     async def on_cleanup(self, app: web.Application) -> None:
         for t in self.tasks:
             t.cancel()
-        self.stop_capture()
+        await self.stop_capture()
 
     def build_app(self) -> web.Application:
         app = web.Application()

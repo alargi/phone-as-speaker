@@ -119,6 +119,8 @@ async def run_checks() -> int:
             check("播放页含自适应缓冲档位", "TIERS" in player and "renderTiers" in player)
             check("播放页含抖动缓冲与 RTT 探针",
                   "nextTime" in player and '"ping"' in player and '"pong"' in player)
+            check("播放页在积压跳帧时取消未播旧帧",
+                  "cancelPending" in player and "src.stop()" in player)
 
             async with session.get(f"{BASE}/console") as r:
                 console = await r.text()
@@ -156,6 +158,18 @@ async def run_checks() -> int:
             out("\n4. 只读 API")
             for key in ("ok", "capture", "config", "totals", "clients", "history", "link", "log"):
                 check(f"/api/status 含字段 {key}", key in st)
+
+            async with session.get(f"{BASE}/health") as r:
+                health = await r.json()
+            check("GET /health 暴露采集健康度",
+                  r.status == 200
+                  and all(k in health for k in ("capture_buffer_ms", "capture_lost_ms",
+                                                "capture_discontinuities")),
+                  f"缓冲 {health.get('capture_buffer_ms')} ms / "
+                  f"断点 {health.get('capture_discontinuities')} 次")
+            check("/health 的 RTT 给中位与峰值两个口径",
+                  "rtt_ms" in health and "rtt_max_ms" in health,
+                  f"中位 {health.get('rtt_ms')} / 峰 {health.get('rtt_max_ms')}")
 
             async with session.get(f"{BASE}/api/devices") as r:
                 dev = await r.json()
@@ -212,13 +226,16 @@ async def run_checks() -> int:
                     {"type": "rtt", "ms": 1.4, "jitter": 0.3, "buffer_ms": 60}))
 
                 out("\n6. 参数变更")
+                # 起始分帧由链路档位决定（有线 10ms、无线 20ms），所以新值不能写死，
+                # 否则无线档下提交同一个值等于没改，rev 不涨、这条用例会假失败。
+                new_fms = 20 if fms != 20 else 10
                 async with session.post(f"{BASE}/api/config",
-                                        json={"frame_ms": 20}) as r:
+                                        json={"frame_ms": new_fms}) as r:
                     j = await r.json()
-                new_expect = int(rate * 20 / 1000) * ch * 2
+                new_expect = int(rate * new_fms / 1000) * ch * 2
                 check("POST /api/config 接受新分帧",
-                      r.status == 200 and j["config"]["frame_ms"] == 20,
-                      f"frame_ms={j['config']['frame_ms']}")
+                      r.status == 200 and j["config"]["frame_ms"] == new_fms,
+                      f"frame_ms={j['config']['frame_ms']}（原 {fms}）")
                 check("单帧字节随分帧同步变化",
                       j["config"]["frame_bytes"] == new_expect,
                       f"{j['config']['frame_bytes']}（期望 {new_expect}）")
@@ -269,6 +286,27 @@ async def run_checks() -> int:
                           f"clients={h2['totals']['clients']}")
                     check("客户端列表含基本信息",
                           all("ua" in c and "sent_frames" in c for c in h2["clients"]))
+
+                    # RTT 口径：一次 40ms 的采样不该被当成常态，接口要同时给出
+                    # 中位与峰值，且链路时延单独报（扣掉服务端发送反压后的那段）。
+                    for ms, link in ((45.0, 3.0), (3.0, 2.5), (3.2, 2.4)):
+                        await ws2.send_str(json.dumps(
+                            {"type": "rtt", "ms": ms, "jitter": 1.0,
+                             "link_ms": link, "buffer_ms": 60}))
+                        await asyncio.sleep(0.05)
+                    await asyncio.sleep(0.3)
+                    async with session.get(f"{BASE}/api/status") as r:
+                        h2b = await r.json()
+                    rtt_c = [c for c in h2b["clients"] if c.get("rtt_med_ms") is not None]
+                    # 前面几组留下的连接也在列表里，按峰值挑出刚发过 45ms 的这一路
+                    c0 = max(rtt_c, key=lambda c: c.get("rtt_max_ms") or 0) if rtt_c else {}
+                    check("RTT 同时报中位与峰值，尖峰不冒充常态",
+                          c0.get("rtt_med_ms") == 3.2 and c0.get("rtt_max_ms") == 45.0
+                          and c0.get("rtt_ms") == 3.2,
+                          f"中位 {c0.get('rtt_med_ms')} / 峰 {c0.get('rtt_max_ms')} / "
+                          f"最近 {c0.get('rtt_ms')}")
+                    check("链路时延单独成项（已扣服务端发送反压）",
+                          c0.get("link_med_ms") == 2.5, f"链路 {c0.get('link_med_ms')}")
 
         out("\n9. 断开清理")
         await asyncio.sleep(0.8)

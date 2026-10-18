@@ -232,7 +232,8 @@
         <thead>
           <tr>
             <th>#</th><th>设备</th><th>已连</th><th>已发帧</th><th>丢弃</th>
-            <th>链路 RTT</th><th>抖动</th><th>缓冲</th>
+            <th>发送积压</th>
+            <th>链路 RTT（中位/峰）</th><th>抖动</th><th>缓冲</th>
           </tr>
         </thead>
         <tbody id="clientBody">
@@ -304,6 +305,32 @@
     return ss + " 秒";
   }
 
+  // 转义后再进 innerHTML。UA、网卡名、adb 输出这些字符串都来自外部
+  // （手机 UA 由手机自己决定），直接拼进 HTML 等于让局域网里的一台设备
+  // 往控制台里插标签甚至脚本。
+  function esc(s){
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){
+      return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c];
+    });
+  }
+
+  // RTT 一格放三个数：中位（平时多快）、峰（抖到多少）、链路（扣掉服务端发送
+  // 积压后还剩多少）。只显示"最近一次"时，一次 40ms 的采样就会让人以为链路
+  // 整体变了，而前后十几次都是 3ms。
+  function rttCell(c){
+    if (c.rtt_med_ms == null) return "—";
+    var extra = [];
+    if (c.rtt_max_ms != null && c.rtt_max_ms > c.rtt_med_ms * 2 + 2)
+      extra.push('<span class="tag bad">峰 ' + c.rtt_max_ms + "</span>");
+    if (c.link_med_ms != null && Math.abs(c.link_med_ms - c.rtt_med_ms) > 1.5)
+      extra.push('<span style="opacity:.65">链路 ' + c.link_med_ms + "</span>");
+    var tip = "中位 " + c.rtt_med_ms + " ms";
+    if (c.rtt_max_ms != null) tip += " · 峰 " + c.rtt_max_ms + " ms";
+    if (c.link_med_ms != null) tip += " · 链路 " + c.link_med_ms + " ms";
+    return '<span title="' + tip + '">' + c.rtt_med_ms + " ms" +
+      (extra.length ? " " + extra.join(" ") : "") + "</span>";
+  }
+
   // ---------- 曲线 ----------
   function sparkline(svg, values, stroke, fill){
     var W = 600, H = 56;
@@ -345,7 +372,8 @@
     $("mCh").innerHTML = (cfg.channels || 0) + '<small> ch</small>';
     $("mFrame").innerHTML = (cfg.frame_ms || 0) + '<small> ms</small>';
     $("mFbytes").innerHTML = (cfg.frame_bytes || 0) + '<small> B</small>';
-    $("mKbps").innerHTML = Math.round(tot.kbps || 0) + '<small> kbps</small>';
+    $("mKbps").innerHTML = Math.round(tot.kbps || 0) + '<small> kbps</small>' +
+      (tot.dropped ? ' <span class="tag bad">丢 ' + tot.dropped + "</span>" : "");
     $("mFrames").textContent = (tot.frames || 0).toLocaleString();
     $("mClients").textContent = tot.clients || 0;
 
@@ -376,8 +404,8 @@
     var altBox = $("altList");
     if (alt.length){
       altBox.innerHTML = alt.map(function(l){
-        return '<div class="row"><span class="tag">' + (KIND_LABEL[l.kind] || l.kind) +
-          '</span><code>' + l.url + '</code><span>' + (l.label || "") + '</span></div>';
+        return '<div class="row"><span class="tag">' + esc(KIND_LABEL[l.kind] || l.kind) +
+          '</span><code>' + esc(l.url) + '</code><span>' + esc(l.label || "") + '</span></div>';
       }).join("");
     } else {
       altBox.innerHTML = "";
@@ -385,23 +413,28 @@
 
     var wl = $("warnList");
     wl.innerHTML = (lk.warnings || []).map(function(w){
-      return "<li>" + w + "</li>";
-    }).join("") + (lk.error ? '<li>链路探测失败：' + lk.error + "</li>" : "");
+      return "<li>" + esc(w) + "</li>";
+    }).join("") + (lk.error ? '<li>链路探测失败：' + esc(lk.error) + "</li>" : "");
 
     // 客户端
     var cl = s.clients || [];
     $("clientHint").textContent = cl.length ? (cl.length + " 路在线") : "—";
     var body = $("clientBody");
     if (!cl.length){
-      body.innerHTML = '<tr><td colspan="8" class="empty">暂无客户端接入</td></tr>';
+      body.innerHTML = '<tr><td colspan="9" class="empty">暂无客户端接入</td></tr>';
     } else {
       body.innerHTML = cl.map(function(c){
         return "<tr><td>#" + c.id + "</td>" +
-          '<td class="ua" title="' + (c.ua || "") + '">' + (c.ua || "未知设备") + "</td>" +
+          '<td class="ua" title="' + esc(c.ua || "") + '">' + esc(c.ua || "未知设备") + "</td>" +
           "<td>" + fmtDur(c.since) + "</td>" +
           "<td>" + c.sent_frames.toLocaleString() + "</td>" +
           "<td>" + (c.dropped ? '<span class="tag bad">' + c.dropped + "</span>" : "0") + "</td>" +
-          "<td>" + (c.rtt_ms != null ? (c.rtt_ms + " ms") : "—") + "</td>" +
+          // 发送积压：socket 写缓冲等内核腾位置的耗时 + 还没发出去的帧数。
+          // 这一列涨而 RTT 也涨，说明慢在我们自己排队，不是链路。
+          "<td>" + ((c.send_wait_max_ms > 0.5 || c.queued > 0)
+            ? '<span class="tag bad">' + c.send_wait_max_ms + " ms · " + c.queued + " 帧</span>"
+            : "—") + "</td>" +
+          "<td>" + rttCell(c) + "</td>" +
           "<td>" + (c.jitter_ms != null ? ("±" + c.jitter_ms) : "—") + "</td>" +
           "<td>" + (c.buffer_ms != null ? (c.buffer_ms + " ms") : "—") + "</td>" +
           "</tr>";

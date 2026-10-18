@@ -154,6 +154,8 @@
     buf: null,
     cfg: { rate: 48000, channels: 2, frame_ms: 10 },
     nextTime: 0,
+    linkSamples: [],       // 扣掉服务端发送反压后的「链路时延」样本
+    pending: [],           // 已调度、尚未播出的源（跳帧时要能取消，否则新旧重叠=爆音）
     primed: false,
     running: false,
     wantRun: false,
@@ -239,12 +241,30 @@
   }
 
   // ---------- 抖动缓冲调度 ----------
+  // 已调度但还没播出来的源。积压跳帧时如果只把 nextTime 往前挪，旧帧仍然挂在时间轴
+  // 上等着播，新旧两段叠在一起就是「咔」的一声——所以必须把它们取消掉。
+  function prunePending(now){
+    while (S.pending.length && S.pending[0].t < now - 0.5) { S.pending.shift(); }
+  }
+
+  // 只取消「还没开始播」的源：正在播的停掉会削出爆音，让它自然放完（最多一帧）。
+  function cancelPending(now){
+    var keep = [];
+    for (var i = 0; i < S.pending.length; i++){
+      var p = S.pending[i];
+      if (p.t > now + 0.002) { try { p.src.stop(); } catch (e) {} }
+      else { keep.push(p); }
+    }
+    S.pending = keep;
+  }
+
   function schedule(audioBuf){
     var ac = S.ac;
     var now = ac.currentTime;
     var target = S.targetMs / 1000;
     // 积压上限必须大于缓冲深度，否则厚缓冲档会被误判为「积压过多」而反复重排。
     var maxLead = Math.max(0.3, target * 3);
+    prunePending(now);
 
     // 断流后重新对齐，否则会一次性补播积压数据
     if (!S.primed || S.nextTime < now + 0.004) {
@@ -253,6 +273,7 @@
     }
     // 积压过多则跳到最新，保证实时性优先
     if (S.nextTime - now > maxLead) {
+      cancelPending(now);
       S.nextTime = now + target;
       S.stat.skip++;
     }
@@ -260,7 +281,9 @@
     var src = ac.createBufferSource();
     src.buffer = audioBuf;
     src.connect(S.gain);
-    src.start(S.nextTime);
+    var startAt = S.nextTime;
+    src.start(startAt);
+    S.pending.push({ src: src, t: startAt });
     S.nextTime += audioBuf.duration;
     S.primed = true;
     S.stat.frames++;
@@ -315,10 +338,17 @@
         if (rtt >= 0 && rtt < 5000) {
           S.rttSamples.push(rtt);
           if (S.rttSamples.length > 12) { S.rttSamples.shift(); }
+          // 扣掉服务端自己的发送反压：RTT 里混着"我们排队等 socket"，不扣掉
+          // 就会把自家积压看成链路慢了十倍。扣完剩下的才是链路时延。
+          var link = Math.max(0, rtt - (typeof m.w === "number" ? m.w : 0));
+          S.linkSamples.push(link);
+          if (S.linkSamples.length > 12) { S.linkSamples.shift(); }
           if (S.ws && S.ws.readyState === 1) {
-            var mean = 0, k;
+            var mean = 0, lmean = 0, k;
             for (k = 0; k < S.rttSamples.length; k++) { mean += S.rttSamples[k]; }
             mean /= S.rttSamples.length;
+            for (k = 0; k < S.linkSamples.length; k++) { lmean += S.linkSamples[k]; }
+            lmean /= S.linkSamples.length;
             var vs = 0;
             for (k = 0; k < S.rttSamples.length; k++) {
               vs += (S.rttSamples[k] - mean) * (S.rttSamples[k] - mean);
@@ -326,7 +356,8 @@
             var sd = Math.sqrt(vs / S.rttSamples.length);
             try {
               S.ws.send(JSON.stringify({
-                type: "rtt", ms: rtt, jitter: sd, buffer_ms: S.targetMs
+                type: "rtt", ms: rtt, jitter: sd, buffer_ms: S.targetMs,
+                link_ms: lmean, queued: m.q || 0
               }));
             } catch (e) {}
           }
@@ -373,7 +404,9 @@
       S.running = true;
       S.primed = false;
       S.nextTime = 0;
+      cancelPending(S.ac ? S.ac.currentTime : 0);
       S.rttSamples = [];
+      S.linkSamples = [];
       resumeAudio();
       requestWakeLock();
       startPing();
@@ -403,8 +436,10 @@
     S.running = false;
     S.primed = false;
     S.nextTime = 0;
+    cancelPending(S.ac ? S.ac.currentTime : 0);
     S.audioBlocked = false;
     S.rttSamples = [];
+    S.linkSamples = [];
     stopPing();
     releaseWakeLock();
     setStatus("已断开", "");
@@ -473,8 +508,14 @@
         varSum += (S.rttSamples[i] - mean) * (S.rttSamples[i] - mean);
       }
       var sd = Math.sqrt(varSum / S.rttSamples.length);
+      // 括号里的「链路」是扣掉服务端发送反压之后的时延；两者差得多，说明慢在
+      // 我们自己排队，不是 USB / 网络本身。
+      var lsum = 0;
+      for (i = 0; i < S.linkSamples.length; i++) { lsum += S.linkSamples[i]; }
+      var extra = S.linkSamples.length
+        ? " · 链路 " + (lsum / S.linkSamples.length).toFixed(1) + " ms" : "";
       el("stRtt").innerHTML = mean.toFixed(1) +
-        '<span style="font-size:11px;font-weight:400"> ms ±' + sd.toFixed(1) + '</span>';
+        '<span style="font-size:11px;font-weight:400"> ms ±' + sd.toFixed(1) + extra + '</span>';
     } else {
       el("stRtt").innerHTML = '—';
     }
