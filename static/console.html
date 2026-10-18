@@ -233,7 +233,7 @@
           <tr>
             <th>#</th><th>设备</th><th>已连</th><th>已发帧</th><th>丢弃</th>
             <th>发送积压</th>
-            <th>链路 RTT</th><th>抖动</th><th>缓冲</th>
+            <th>链路 RTT（中位/峰）</th><th>抖动</th><th>缓冲</th>
           </tr>
         </thead>
         <tbody id="clientBody">
@@ -312,6 +312,23 @@
     return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){
       return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c];
     });
+  }
+
+  // RTT 一格放三个数：中位（平时多快）、峰（抖到多少）、链路（扣掉服务端发送
+  // 积压后还剩多少）。只显示"最近一次"时，一次 40ms 的采样就会让人以为链路
+  // 整体变了，而前后十几次都是 3ms。
+  function rttCell(c){
+    if (c.rtt_med_ms == null) return "—";
+    var extra = [];
+    if (c.rtt_max_ms != null && c.rtt_max_ms > c.rtt_med_ms * 2 + 2)
+      extra.push('<span class="tag bad">峰 ' + c.rtt_max_ms + "</span>");
+    if (c.link_med_ms != null && Math.abs(c.link_med_ms - c.rtt_med_ms) > 1.5)
+      extra.push('<span style="opacity:.65">链路 ' + c.link_med_ms + "</span>");
+    var tip = "中位 " + c.rtt_med_ms + " ms";
+    if (c.rtt_max_ms != null) tip += " · 峰 " + c.rtt_max_ms + " ms";
+    if (c.link_med_ms != null) tip += " · 链路 " + c.link_med_ms + " ms";
+    return '<span title="' + tip + '">' + c.rtt_med_ms + " ms" +
+      (extra.length ? " " + extra.join(" ") : "") + "</span>";
   }
 
   // ---------- 曲线 ----------
@@ -417,7 +434,7 @@
           "<td>" + ((c.send_wait_max_ms > 0.5 || c.queued > 0)
             ? '<span class="tag bad">' + c.send_wait_max_ms + " ms · " + c.queued + " 帧</span>"
             : "—") + "</td>" +
-          "<td>" + (c.rtt_ms != null ? (c.rtt_ms + " ms") : "—") + "</td>" +
+          "<td>" + rttCell(c) + "</td>" +
           "<td>" + (c.jitter_ms != null ? ("±" + c.jitter_ms) : "—") + "</td>" +
           "<td>" + (c.buffer_ms != null ? (c.buffer_ms + " ms") : "—") + "</td>" +
           "</tr>";

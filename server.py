@@ -151,6 +151,11 @@ ALLOWED_FRAME_MS = (5, 10, 20, 30, 40, 60, 100)
 ALLOWED_RATES = (0, 48000, 44100, 32000, 24000, 16000, 8000)
 ALLOWED_CHANNELS = (1, 2)
 
+# 客户端每 2 秒回报一次 RTT。只保留「最近一次」时，一次 40ms 的采样就会让控制台
+# 显示成 40ms，而前后几十次都是 3ms——看上去像链路整体变差了。留 8 次（约 16 秒）
+# 并同时给出中位数与最大值，才能区分「一直慢」和「偶尔抖」。
+RTT_HISTORY = 8
+
 LOG_RING: deque[str] = deque(maxlen=300)
 
 
@@ -438,7 +443,10 @@ class Viewer:
         # 客户端回报的 RTT 里混着它，看起来就像链路突然慢了十倍。
         self.send_wait_ms = 0.0
         self.send_wait_max = 0.0
-        self.rtt_ms: float | None = None       # 由客户端回报的链路往返时延
+        self.rtt_ms: float | None = None       # 由客户端回报的链路往返时延（最近一次）
+        self.rtt_hist: deque[float] = deque(maxlen=RTT_HISTORY)   # 最近若干次采样
+        self.link_ms: float | None = None      # 扣掉服务端发送反压后的链路时延
+        self.link_hist: deque[float] = deque(maxlen=RTT_HISTORY)
         self.jitter_ms: float | None = None    # 客户端回报的 RTT 标准差
         self.buffer_ms: int | None = None      # 客户端当前缓冲档位
         self.ua = ua[:70]
@@ -486,6 +494,13 @@ class Viewer:
             self.sent_frames += 1
             self.sent_bytes += len(frame)
 
+    def rtt_summary(self) -> tuple[float | None, float | None, float | None]:
+        """(最近一次, 中位数, 最大值)。偶数个采样时取偏上的那个，够用。"""
+        if not self.rtt_hist:
+            return None, None, None
+        ordered = sorted(self.rtt_hist)
+        return self.rtt_hist[-1], ordered[len(ordered) // 2], ordered[-1]
+
     def snapshot(self) -> dict:
         return {
             "id": self.id,
@@ -496,7 +511,14 @@ class Viewer:
             "queued": self.queue.qsize(),
             "send_wait_ms": round(self.send_wait_ms, 1),
             "send_wait_max_ms": round(self.send_wait_max, 1),
-            "rtt_ms": round(self.rtt_ms, 1) if self.rtt_ms is not None else None,
+            "rtt_ms": round(self.rtt_hist[-1], 1) if self.rtt_hist else None,
+            "rtt_med_ms": (round(self.rtt_summary()[1], 1)
+                           if self.rtt_hist else None),
+            "rtt_max_ms": (round(self.rtt_summary()[2], 1)
+                           if self.rtt_hist else None),
+            "link_ms": round(self.link_hist[-1], 1) if self.link_hist else None,
+            "link_med_ms": (round(sorted(self.link_hist)[len(self.link_hist) // 2], 1)
+                            if self.link_hist else None),
             "jitter_ms": round(self.jitter_ms, 1) if self.jitter_ms is not None else None,
             "buffer_ms": self.buffer_ms,
         }
@@ -630,7 +652,10 @@ class SpeakerServer:
         s = self.state
         cap = s.capture
         elapsed = max(time.time() - s.started, 0.001)
-        rtts = [v.rtt_ms for v in s.clients.values() if v.rtt_ms is not None]
+        rtt_meds = [v.rtt_summary()[1] for v in s.clients.values() if v.rtt_hist]
+        rtt_peaks = [v.rtt_summary()[2] for v in s.clients.values() if v.rtt_hist]
+        rtt_med = round(sorted(rtt_meds)[len(rtt_meds) // 2], 1) if rtt_meds else None
+        rtt_peak = round(max(rtt_peaks), 1) if rtt_peaks else None
         return web.json_response({
             "ok": cap is not None and cap.error is None,
             "device": cap.device_name if cap else None,
@@ -644,7 +669,8 @@ class SpeakerServer:
             "kbps": round(s.bytes_out * 8 / elapsed / 1000.0, 1),
             "link": s.link_kind,
             "best_url": s.best_url,
-            "rtt_ms": round(min(rtts), 1) if rtts else None,
+            "rtt_ms": rtt_med,
+            "rtt_max_ms": rtt_peak,
             "capture_error": cap.error if cap else "not started",
         })
 
@@ -984,9 +1010,19 @@ class SpeakerServer:
                     }))
                 elif mtype == "rtt":
                     try:
-                        viewer.rtt_ms = float(req.get("ms"))
+                        ms = float(req.get("ms"))
                     except (TypeError, ValueError):
-                        pass
+                        ms = None
+                    if ms is not None:
+                        viewer.rtt_ms = ms
+                        viewer.rtt_hist.append(ms)
+                    try:
+                        lm = float(req.get("link_ms"))
+                    except (TypeError, ValueError):
+                        lm = None
+                    if lm is not None:
+                        viewer.link_ms = lm
+                        viewer.link_hist.append(lm)
                     try:
                         viewer.jitter_ms = float(req.get("jitter"))
                     except (TypeError, ValueError):
@@ -1034,8 +1070,15 @@ class SpeakerServer:
             s = self.state
             cap = s.capture
             err = f"  ⚠ {cap.error}" if cap and cap.error else ""
-            rtts = [v.rtt_ms for v in s.clients.values() if v.rtt_ms is not None]
-            rtt = f"  链路RTT {min(rtts):.1f} ms" if rtts else ""
+            meds = [v.rtt_summary()[1] for v in s.clients.values() if v.rtt_hist]
+            peaks = [v.rtt_summary()[2] for v in s.clients.values() if v.rtt_hist]
+            if meds:
+                med = sorted(meds)[len(meds) // 2]
+                # 中位数说"平时多快"，峰值说"抖到什么程度"。只打 min 会把尖峰抹平，
+                # 只打最近一次又会把一次 40ms 的偶然当成常态。
+                rtt = f"  RTT 中位 {med:.1f} / 峰 {max(peaks):.1f} ms"
+            else:
+                rtt = ""
             drop = f"  丢弃 {self.dropped_frames}" if self.dropped_frames else ""
             log(f"[*] 帧 {s.frames_out:>7}  产出 {s.produced_frames:>7}  "
                 f"码率 {s.bytes_out * 8 / 1000 / max(time.time() - s.started, 0.001):>7.0f} kbps  "
