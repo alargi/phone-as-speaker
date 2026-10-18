@@ -50,7 +50,7 @@
 | 字段 | 内容 |
 |---|---|
 | `ok` | 请求是否成功 |
-| `capture` | 采集是否运行、捕获设备名、捕获采样率、错误信息 |
+| `capture` | 采集是否运行、捕获设备名、捕获采样率、错误信息；`buffer_ms` 环形缓冲时长，`buffer_fallback` 加大缓冲失败时的原因，`lost_ms` 累计真丢掉的音频毫秒数，`discontinuities` WASAPI 报告的断点次数 |
 | `config` | 捕获设备、分帧长度、声道数、捕获 / 推送采样率、单帧字节 |
 | `totals` | 累计发送帧数、码率、帧率、运行时长 |
 | `clients` | 每路连接：标识、接入时刻、已发帧、丢弃帧、RTT、抖动、缓冲档位 |
@@ -109,6 +109,7 @@ python server.py [选项]
 | `--frame-ms` | `10` | 分帧长度；**不传时按链路类型自动选档** |
 | `--device` | 空 | 回环设备名关键字，留空用默认扬声器 |
 | `--queue-max` | `15` | 每路客户端待发队列上限，超出丢最旧帧 |
+| `--capture-buffer-ms` | `100` | WASAPI 环形缓冲时长；越大越抗系统卡顿，不影响播放延迟 |
 | `--list-devices` | — | 列出所有输出设备与回环设备后退出 |
 | `--silent` | 关 | 不向控制台输出；stdout/stderr 改写进 `speaker.log`（`run-silent.vbs` 内部使用） |
 

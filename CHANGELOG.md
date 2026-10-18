@@ -3,6 +3,27 @@
 本文件记录项目的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [未发布]
+
+### 修复
+
+**采集端丢音频（音频在进网络之前就已经少了）**
+- WASAPI 环形缓冲此前隐式等于读取块（默认 10 ms），采集线程一旦被系统抢走十几毫秒就会
+  溢出，旧音频被 WASAPI 直接丢弃，听感是「随机跳一下」，而服务端丢帧计数仍是 0。
+  现在环形缓冲独立放大到 100 ms，读取块不变，因此播放延迟不变。
+  实测：10 ms 缓冲在 30 ms 停顿下丢 240 ms 音频、报 32 次 discontinuity；100 ms 缓冲零丢失。
+- 采集线程提到 `ABOVE_NORMAL` 优先级；放宽 CPython 分代 GC 阈值并冻结启动期对象，
+  减少采集线程自身的停顿来源。
+- `soundcard` 的 `SoundcardRuntimeWarning: data discontinuity in recording` 此前被 warnings
+  按位置去重、只打印一次，且不进日志环。现在接管 `warnings.showwarning` 逐次计数。
+
+### 新增
+
+- 启动参数 `--capture-buffer-ms`（默认 `100`）：WASAPI 环形缓冲时长。
+- `/api/status` 的 `capture` 增加 `buffer_ms`、`buffer_fallback`、`lost_ms`、`discontinuities`；
+  `/health` 增加 `capture_buffer_ms`、`capture_lost_ms`、`capture_discontinuities`。
+- 控制台显示「采集缓冲」与「音频断点」，出现断点时标红。
+
 ## [1.0.0] — 2026-09-13
 
 首个公开发布版本。

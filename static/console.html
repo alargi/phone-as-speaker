@@ -149,6 +149,8 @@
         <span>捕获设备</span>
         <span class="tag" id="mDevice">—</span>
         <span class="tag" id="mCapRate">—</span>
+        <span class="tag" id="mBuf">—</span>
+        <span class="tag" id="mDisc">—</span>
         <span class="tag" id="mErr"></span>
       </div>
     </div>
@@ -351,6 +353,18 @@
 
     $("mDevice").textContent = cap.device || "未开始";
     $("mCapRate").textContent = cap.capture_rate ? ("捕获 " + cap.capture_rate + " Hz") : "—";
+    var mb = $("mBuf");
+    if (cap.buffer_ms){
+      mb.textContent = "采集缓冲 " + cap.buffer_ms + " ms";
+      mb.className = cap.buffer_fallback ? "tag bad" : "tag";
+      mb.title = cap.buffer_fallback ? ("放大失败，已退回： " + cap.buffer_fallback) : "WASAPI 环形缓冲；越大越抗卡顿";
+    } else { mb.textContent = "—"; mb.className = "tag"; mb.title = ""; }
+    var md = $("mDisc"), nd = cap.discontinuities || 0, lost = cap.lost_ms || 0;
+    if (nd || lost >= 5){
+      md.textContent = "音频断点 " + nd + " 次 · 丢 " + Math.round(lost) + " ms";
+      md.className = "tag bad";
+      md.title = "采集端真的丢了音频：不是链路问题，调大缓冲或查系统卡顿";
+    } else { md.textContent = "音频无断点"; md.className = "tag"; md.title = ""; }
     var e = $("mErr");
     if (cap.error){ e.textContent = cap.error; e.className = "tag bad"; }
     else { e.textContent = ""; e.className = "tag"; }

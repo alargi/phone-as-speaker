@@ -58,6 +58,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import gc
 import io
 import json
 import os
@@ -65,6 +66,7 @@ import socket
 import sys
 import threading
 import time
+import warnings
 import webbrowser
 from collections import deque
 from pathlib import Path
@@ -134,6 +136,10 @@ DEFAULT_RATE = 48000
 DEFAULT_CHANNELS = 2
 DEFAULT_FRAME_MS = 10
 DEFAULT_QUEUE_MAX = 15
+# WASAPI 环形缓冲时长。soundcard 把它和「每次读多少」混为一谈（都取 blocksize），
+# 于是 10ms 分帧就只有 10ms 余量：线程被打断十几毫秒，环形缓冲溢出，音频真的丢了。
+# 单独放大缓冲不影响播放延迟（我们照旧按帧长读走），只是留出抗抖动的余量。
+DEFAULT_CAPTURE_BUFFER_MS = 100
 
 # 控制台允许的取值（防止 API 被灌入离谱参数）
 ALLOWED_FRAME_MS = (5, 10, 20, 30, 40, 60, 100)
@@ -337,6 +343,63 @@ def _negotiate_capture_rate(device, preferred: int) -> int:
     raise RuntimeError(f"回环设备无法以任何候选采样率打开：{last_err!r}")
 
 
+def _boost_thread_priority() -> None:
+    """把当前线程提到 ABOVE_NORMAL（仅 Windows，失败静默）。
+
+    WASAPI 回环由 soundcard 自己的线程搬运，我们这条线程负责「读块 → 转
+    int16 → 分帧 → 丢给事件循环」。它一旦被普通优先级线程挤掉十几毫秒，
+    环形缓冲就会溢出，丢掉的是真实音频，不是可再生的数据。
+    """
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        kernel32.SetThreadPriority(kernel32.GetCurrentThread(), 1)  # ABOVE_NORMAL
+    except Exception:                                 # noqa: BLE001
+        pass
+
+
+def _tune_gc() -> None:
+    """减少 GC 停顿。
+
+    CPython 的分代 GC 在全量回收时会停顿几毫秒到几十毫秒，与 WASAPI 的
+    缓冲余量是同一量级。冻结启动期对象（之后不再扫描它们）并放宽阈值，
+    可以把全量回收的频率降一到两个数量级，代价是常驻内存略增。
+    """
+    try:
+        gc.collect()
+        gc.freeze()
+        gc.set_threshold(5000, 20, 20)
+    except Exception:                                 # noqa: BLE001
+        pass
+
+
+# soundcard 在 WASAPI 缓冲溢出时会 warnings.warn("data discontinuity in recording")。
+# 这条警告意味着**真的丢了一段音频**，是排查「偶尔断一下」的关键指标，
+# 默认却只打印一次（warnings 按位置去重）。这里把它接住并计数。
+_CAPTURE_SINKS: list = []
+
+
+def _install_discontinuity_hook() -> None:
+    if getattr(warnings.showwarning, "_pas_hooked", False):
+        return
+
+    from soundcard import SoundcardRuntimeWarning
+
+    orig = warnings.showwarning
+
+    def showwarning(message, category, filename, lineno, file=None, line=None):
+        if (category is not None and issubclass(category, SoundcardRuntimeWarning)
+                and "discontinuity" in str(message)):
+            for sink in _CAPTURE_SINKS:
+                sink()
+            return
+        orig(message, category, filename, lineno, file, line)
+
+    showwarning._pas_hooked = True               # type: ignore[attr-defined]
+    warnings.showwarning = showwarning
+    warnings.simplefilter("always", SoundcardRuntimeWarning)
+
+
 class AudioCapture:
     """在独立线程里跑 WASAPI 回环捕获，通过回调把帧交给事件循环。
 
@@ -351,12 +414,22 @@ class AudioCapture:
         self.error: str | None = None
         self.device_name = "-"
         self.capture_rate = 0
+        self.buffer_frames = 0          # WASAPI 环形缓冲帧数（不是每次读的帧数）
+        self.buffer_fallback = ""       # 加大缓冲失败时的原因
+        # ---- 可观测性：正常应当长期为 0 ----
+        self.frames_in = 0              # 从设备读到的总帧数
+        self.lost_ms = 0.0              # 累计真丢掉的音频时长（1s 粒度结算）
+        self.discontinuities = 0        # WASAPI 报告「数据不连续」的次数
+        self._started_t: float | None = None
+        self._sample_t = 0.0            # 上次结算时刻
+        self._sample_ref = 0.0          # 上次结算时的缺口，用来算增量
         self._thread = threading.Thread(target=self._run, name="audio-capture", daemon=True)
 
     # ---- 生命周期 ----
     def start(self) -> None:
         if not self._thread.is_alive():
             self._thread = threading.Thread(target=self._run, name="audio-capture", daemon=True)
+        _CAPTURE_SINKS[:] = [self._note_discontinuity]
         self._thread.start()
 
     def stop(self, wait: float = 3.0) -> None:
@@ -368,9 +441,55 @@ class AudioCapture:
     def alive(self) -> bool:
         return self._thread.is_alive()
 
+    # ---- 统计 ----
+    def _note_discontinuity(self) -> None:
+        self.discontinuities += 1
+
+    def _note_progress(self, nframes: int) -> None:
+        """按「读到的帧数 vs 墙上时钟」结算采集端缺口。
+
+        缺口就是丢掉的音频：WASAPI 溢出时旧数据被丢掉，时间轴照样往前走，
+        我们只会读得少。但缺口本身会随设备晶振与 perf_counter 的频率差缓慢
+        漂移（几十 ppm，每秒 20µs 量级），长时间运行会累积成假报警，所以不
+        能直接当丢帧。这里每秒结算一次，只有一秒之内缺口跳变超过 1ms 才算真
+        丢——真实断点一次就是几十毫秒，与漂移差三个数量级。
+
+        另外，按相邻两块间隔判断丢帧是不可靠的：缓冲放大后设备会攒几块一起
+        交付，间隔看着吓人，其实一帧没丢。
+        """
+        now = time.perf_counter()
+        if self._started_t is None:
+            self._started_t = self._sample_t = now
+            return
+        if now - self._started_t < 3.0:
+            # 预热期：设备刚打开、格式刚协商，难免有一次性的缺口，不该记成丢帧。
+            # 把计量起点一直滚到预热结束。
+            self._started_t = self._sample_t = now
+            self.frames_in = 0
+            self._sample_ref = 0.0
+            return
+        self.frames_in += nframes
+        deficit = ((self.capture_rate * (now - self._started_t) - self.frames_in)
+                   / self.capture_rate * 1000.0)
+        if now - self._sample_t >= 1.0:
+            if deficit > self._sample_ref + 1.0:
+                self.lost_ms += deficit - self._sample_ref
+            self._sample_ref = deficit
+            self._sample_t = now
+
+    def stats(self) -> dict:
+        rate = self.capture_rate or 0
+        return {
+            "buffer_ms": round(self.buffer_frames / rate * 1000, 1) if rate else 0.0,
+            "buffer_fallback": self.buffer_fallback,
+            "lost_ms": round(self.lost_ms, 1),
+            "discontinuities": self.discontinuities,
+        }
+
     # ---- 采集主循环 ----
     def _run(self) -> None:
         ensure_com()                                  # 新线程必须自己初始化 COM
+        _boost_thread_priority()
         try:
             # 参数快照：之后改 cfg 不会影响本次运行
             dev_hint = self.cfg.device
@@ -384,14 +503,30 @@ class AudioCapture:
             self.capture_rate = _negotiate_capture_rate(dev, self.cfg.capture_rate)
             block = max(int(self.capture_rate * frame_ms / 1000), 128)
 
+            # 环形缓冲 ≠ 读取块。soundcard 把 blocksize 直接喂给
+            # IAudioClient::Initialize 当缓冲时长，默认的 10ms 分帧于是只有
+            # 10ms 余量；这里单独放大，读取仍是 block 帧，播放延迟不变。
+            want_buf = max(int(self.capture_rate * self.cfg.capture_buffer_ms / 1000), block)
+            try:
+                rec_cm = dev.recorder(samplerate=self.capture_rate, blocksize=want_buf)
+                self.buffer_frames = want_buf
+            except Exception as exc:                  # noqa: BLE001
+                if want_buf == block:
+                    raise
+                self.buffer_fallback = f"{type(exc).__name__}: {exc}"
+                log(f"[!] 加大采集缓冲失败（{self.buffer_fallback}），退回 {frame_ms}ms")
+                rec_cm = dev.recorder(samplerate=self.capture_rate, blocksize=block)
+                self.buffer_frames = block
+
             framer = Framer(max(int(want_rate * frame_ms / 1000), 1), want_ch)
 
             if want_rate != self.capture_rate:
                 log(f"[*] 重采样：{self.capture_rate} Hz -> {want_rate} Hz")
 
-            with dev.recorder(samplerate=self.capture_rate, blocksize=block) as rec:
+            with rec_cm as rec:
                 while not self.stop_event.is_set():
                     data = rec.record(numframes=block)
+                    self._note_progress(len(data))
                     pcm = to_int16(data, want_ch)
                     if want_rate != self.capture_rate:
                         pcm = resample_i16(pcm, self.capture_rate, want_rate)
@@ -591,6 +726,10 @@ class SpeakerServer:
             "best_url": s.best_url,
             "rtt_ms": round(min(rtts), 1) if rtts else None,
             "capture_error": cap.error if cap else "not started",
+            # 采集端健康度：丢帧的真正来源在这里，不在链路上
+            "capture_buffer_ms": cap.stats().get("buffer_ms") if cap else None,
+            "capture_lost_ms": cap.stats().get("lost_ms") if cap else None,
+            "capture_discontinuities": cap.discontinuities if cap else None,
         })
 
     # ---- HTTP：控制台 API ----
@@ -622,6 +761,7 @@ class SpeakerServer:
                 "device": cap.device_name if cap else None,
                 "capture_rate": cap.capture_rate if cap else 0,
                 "error": cap.error if cap else None,
+                **(cap.stats() if cap else {}),
             },
             "config": {
                 "rate": self.cfg.effective_rate,
@@ -985,6 +1125,7 @@ class Config:
         self.capture_rate = args.capture_rate
         self.channels = args.channels
         self.frame_ms = args.frame_ms
+        self.capture_buffer_ms = args.capture_buffer_ms
         self.device = args.device
         self.queue_max = args.queue_max
         self.link = args.link
@@ -1128,6 +1269,8 @@ def main() -> int:
     p.add_argument("--device", default="", help="回环设备名关键字，留空用默认扬声器")
     p.add_argument("--queue-max", type=int, default=DEFAULT_QUEUE_MAX,
                    help="每路客户端待发队列上限（帧），超出丢最旧")
+    p.add_argument("--capture-buffer-ms", type=int, default=DEFAULT_CAPTURE_BUFFER_MS,
+                   help="WASAPI 环形缓冲时长；越大越抗系统卡顿，不增加播放延迟")
     p.add_argument("--list-devices", action="store_true", help="列出设备后退出")
     p.add_argument("--silent", action="store_true",
                    help="静默模式：不向控制台输出（run-silent.vbs 用，输出改写进 speaker.log）")
@@ -1147,6 +1290,8 @@ def main() -> int:
 
     # 先把音频后端导入一次，固定 COM 初始化的时机（见 ensure_com 的说明）
     preload_audio_backend()
+    _install_discontinuity_hook()
+    _tune_gc()
 
     if args.list_devices:
         list_devices()

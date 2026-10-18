@@ -48,14 +48,15 @@ async def wait_ready(session, timeout=30.0) -> dict:
 
 
 async def wait_capture(session, timeout=10.0) -> dict:
-    """等采集真正跑起来（设备名被填上），避免刚启动就断言。"""
+    """等采集真正跑起来（设备名、协商采样率、环形缓冲都已就位），避免刚启动就断言。"""
     st = {}
     t0 = time.time()
     while time.time() - t0 < timeout:
         async with session.get(f"{BASE}/api/status") as r:
             st = json.loads(await r.text())
         cap = st.get("capture", {})
-        if cap.get("device") and cap["device"] != "-":
+        if (cap.get("device") and cap["device"] != "-"
+                and cap.get("capture_rate") and cap.get("buffer_ms")):
             return st
         await asyncio.sleep(0.3)
     return st
@@ -110,6 +111,13 @@ async def run_checks() -> int:
             check("音频采集无错误、正在运行",
                   cap["error"] is None and cap["running"],
                   f"device={cap['device']}  rate={cap['capture_rate']}Hz")
+            check("采集环形缓冲已放大（>= 50ms，防止回退成 10ms）",
+                  cap.get("buffer_ms", 0) >= 50,
+                  f"缓冲 {cap.get('buffer_ms')} ms / 分帧 {st['config']['frame_ms']} ms")
+            check("采集健康度字段齐备",
+                  all(k in cap for k in ("buffer_ms", "buffer_fallback",
+                                         "lost_ms", "discontinuities")),
+                  f"丢音频 {cap.get('lost_ms')} ms / 断点 {cap.get('discontinuities')} 次")
 
             out("\n2. 播放页与控制台")
             async with session.get(f"{BASE}/") as r:
@@ -156,6 +164,15 @@ async def run_checks() -> int:
             out("\n4. 只读 API")
             for key in ("ok", "capture", "config", "totals", "clients", "history", "link", "log"):
                 check(f"/api/status 含字段 {key}", key in st)
+
+            async with session.get(f"{BASE}/health") as r:
+                health = await r.json()
+            check("GET /health 暴露采集健康度",
+                  r.status == 200
+                  and all(k in health for k in ("capture_buffer_ms", "capture_lost_ms",
+                                                "capture_discontinuities")),
+                  f"缓冲 {health.get('capture_buffer_ms')} ms / "
+                  f"断点 {health.get('capture_discontinuities')} 次")
 
             async with session.get(f"{BASE}/api/devices") as r:
                 dev = await r.json()
