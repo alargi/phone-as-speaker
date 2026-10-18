@@ -138,7 +138,9 @@ DEFAULT_QUEUE_MAX = 15
 # 控制台允许的取值（防止 API 被灌入离谱参数）
 ALLOWED_FRAME_MS = (5, 10, 20, 30, 40, 60, 100)
 ALLOWED_RATES = (0, 48000, 44100, 32000, 24000, 16000, 8000)
-ALLOWED_CHANNELS = (1, 2)
+# 只放行布局明确的声道数：1 / 2 / 5.1(6) / 7.1(8)。5、7 声道的「切一半」没有意义
+# （6 声道截成 5 会把 BR 丢掉），所以不做，宁可让用户选 5.1 或 7.1。
+ALLOWED_CHANNELS = (1, 2, 6, 8)
 
 LOG_RING: deque[str] = deque(maxlen=300)
 
@@ -224,6 +226,44 @@ class Framer:
         return frames
 
 
+_DOWNMIX = 0.7071067811865476        # -3 dB，ITU-R BS.775 下混系数
+
+
+def _downmix_to_stereo(block: np.ndarray) -> np.ndarray:
+    """把多于两声道的内容下混成立体声，而不是把多余声道直接砍掉。
+
+    WAVEFORMATEXTENSIBLE 的排列是 FL/FR/FC/LFE/BL/BR(/SL/SR)。旧实现取前两路，
+    等于把中置（人声、对白）和环绕整轨丢掉。这里按 ITU-R BS.775 下混：
+
+        L' = L + 0.707·C + 0.707·(BL + SL)
+        R' = R + 0.707·C + 0.707·(BR + SR)
+
+    LFE 不并入：手机扬声器放不出 20~120 Hz，并进去只会吃掉动态余量。
+    """
+    n = block.shape[1]
+    left = block[:, 0].copy()
+    right = block[:, 1].copy()
+    if n == 3:                       # FL/FR/FC
+        left += _DOWNMIX * block[:, 2]
+        right += _DOWNMIX * block[:, 2]
+    elif n == 4:                     # FL/FR/BL/BR（quad）
+        left += _DOWNMIX * block[:, 2]
+        right += _DOWNMIX * block[:, 3]
+    elif n in (5, 6):                # 5.0 = FL/FR/FC/BL/BR，5.1 多一个 LFE
+        left += _DOWNMIX * block[:, 2]
+        right += _DOWNMIX * block[:, 2]
+        surround = 3 if n == 5 else 4
+        left += _DOWNMIX * block[:, surround]
+        right += _DOWNMIX * block[:, surround + 1]
+    else:                            # 6.1 / 7.1：FL/FR/FC/LFE/BL/BR[/SL/SR]
+        left += _DOWNMIX * block[:, 2]
+        right += _DOWNMIX * block[:, 2]
+        for i in range(4, n):
+            target = left if (i - 4) % 2 == 0 else right
+            target += _DOWNMIX * block[:, i]
+    return np.stack([left, right], axis=1)
+
+
 def to_int16(block: np.ndarray, want_channels: int) -> np.ndarray:
     """float32 [-1,1] -> int16，并做声道数归一。"""
     if block.ndim == 1:
@@ -232,10 +272,17 @@ def to_int16(block: np.ndarray, want_channels: int) -> np.ndarray:
     have = block.shape[1]
     if want_channels == 1 and have > 1:
         block = block.mean(axis=1, keepdims=True)
+    elif want_channels == 2 and have > 2:
+        block = _downmix_to_stereo(block)
     elif want_channels == 2 and have == 1:
         block = np.repeat(block, 2, axis=1)
     elif have > want_channels:
         block = block[:, :want_channels]
+    elif have < want_channels:
+        # 设备只给两声道却要求多声道时补零。直接交给 Framer 会因为列数不符而炸掉，
+        # 补零至少能让其余声道静音推送，客户端仍能按约定布局解码。
+        pad = np.zeros((block.shape[0], want_channels - have), dtype=block.dtype)
+        block = np.concatenate([block, pad], axis=1)
 
     np.clip(block, -1.0, 1.0, out=block)
     return (block * 32767.0).astype("<i2")
@@ -385,6 +432,11 @@ class AudioCapture:
             block = max(int(self.capture_rate * frame_ms / 1000), 128)
 
             framer = Framer(max(int(want_rate * frame_ms / 1000), 1), want_ch)
+
+            kbps = want_rate * want_ch * 16 / 1000
+            if kbps > 4000:
+                log(f"[!] {want_ch} 声道 @ {want_rate} Hz 需要 {kbps:.0f} kbps，"
+                    "无线链路多半扛不住；拨不开时改回 2 声道或降到 32000 Hz")
 
             if want_rate != self.capture_rate:
                 log(f"[*] 重采样：{self.capture_rate} Hz -> {want_rate} Hz")
@@ -697,7 +749,7 @@ class SpeakerServer:
                     cfg.channels = v
                     changed.append(f"{v} 声道")
             else:
-                rejected.append("channels 只允许 1 或 2")
+                rejected.append(f"channels 只允许 {ALLOWED_CHANNELS}")
 
         if "rate" in data:
             try:
@@ -1121,8 +1173,10 @@ def main() -> int:
                    help="推送给客户端的采样率；0 = 与捕获采样率一致（不重采样）")
     p.add_argument("--capture-rate", type=int, default=DEFAULT_RATE,
                    help="向系统请求的捕获采样率，会按 48000/44100/32000/96000 顺序协商")
-    p.add_argument("--channels", type=int, choices=[1, 2], default=DEFAULT_CHANNELS,
-                   help="声道数；1 可省一半带宽")
+    p.add_argument("--channels", type=int, choices=list(ALLOWED_CHANNELS),
+                   default=DEFAULT_CHANNELS,
+                   help="声道数：1 省一半带宽，6/8 推送 5.1/7.1（接收端没有多声道输出时"
+                        "只是白花带宽）")
     p.add_argument("--frame-ms", type=int, default=DEFAULT_FRAME_MS,
                    help="网络分帧长度（毫秒）")
     p.add_argument("--device", default="", help="回环设备名关键字，留空用默认扬声器")
